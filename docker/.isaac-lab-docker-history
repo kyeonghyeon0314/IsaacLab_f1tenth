@@ -1,0 +1,71 @@
+python --version
+ls
+nvidia-smi
+nvcc --version
+source ~/.bashrc
+nvcc --version
+ros2 topic list
+echo $LD_LIBRARY_PATH
+source ~/.bashrc
+ros2 topic list
+rviz2
+rviz
+python --version
+cd scripts/demos/
+python quadcopter.py 
+ros2 run demo_nodes_cpp talker
+apt update
+apt upgrade
+ros2 run demo_nodes_cpp talker
+python quadcopter.py --ros
+cd..
+cd ..
+python environments/list_envs.py 
+python environments/random_agent.py --task Isaac-Cartpole-v0 --ros
+ls
+./isaaclab.sh -p scripts/tools/inspect_usd.py /workspace/isaaclab/data_storage/assets/f1tenth/f1tenth.usd
+cd source/isaaclab_assets/isaaclab_assets/f1tenth/
+./convert_to_usd.sh 
+cd /workspace/isaaclab/
+./convert_to_usd.sh 
+ls
+./convert_to_usd.sh 
+ls
+./convert_to_usd.sh 
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py
+./isaaclab.sh -p source/isaaclab_assets/isaaclab_assets/f1tenth/inspect_f1tenth_usd.py
+ps aux
+pkill -9 52900
+pkill -9 52895
+ps aux
+kill -9 52900
+kill -9 52890
+kill -9 52895
+ps --ppid 52900
+./isaaclab.sh -p source/isaaclab_assets/isaaclab_assets/f1tenth/inspect_f1tenth_usd.py
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py
+ps aux
+kill -9 1024
+ps aux
+kill -9 11034
+ps aux
+kill -9 1034
+ps aux
+kill -9 1414
+ps aux
+kill -9 2141
+ps aux
+kill -9 2896
+ps aux
+kill -9 3639
+kill -9 3270
+ps aux
+kill -9 70
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py
+./convert_to_usd.sh 
+kill -9 3270
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 2
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 5
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 1
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 3
