@@ -16,8 +16,8 @@ params:
     clip_actions: 1.0
 
   network:
-    name: actor_critic
-    separate: True  # SAC requires separate actor and critic networks
+    name: sac  # SAC-specific network builder
+    separate: True
 
     space:
       continuous:
@@ -31,7 +31,7 @@ params:
         fixed_sigma: False
 
     mlp:
-      units: [512, 512, 256]  # Same as skrl: 3 hidden layers
+      units: [512, 512, 256]
       activation: relu
       d2rl: False
 

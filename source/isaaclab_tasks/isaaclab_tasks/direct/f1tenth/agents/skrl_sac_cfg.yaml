@@ -19,7 +19,7 @@ models:
     network:
       - name: net
         input: STATES  # LiDAR + vehicle state
-        layers: [512, 512, 256]
+        layers: [256, 256, 128]
         activations: relu
     output: ACTIONS
 
@@ -29,7 +29,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [512, 512, 256]
+        layers: [256, 256, 128]
         activations: relu
     output: ONE
   critic_2:  # Second Q-network (for double Q-learning)
@@ -38,7 +38,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [512, 512, 256]
+        layers: [256, 256, 128]
         activations: relu
     output: ONE
 
@@ -86,14 +86,14 @@ agent:
   random_timesteps: 500  # Start small for debugging
 
   # Learning starts after this many steps
-  learning_starts: 500
+  learning_starts: 1000
 
   # Gradient steps per update
   grad_norm_clip: 1.0
 
   # Batch size for training (scale with num_envs)
   # num_envs=1 → 128, num_envs=512 → 2048, num_envs=1024 → 4096
-  batch_size: 128   # Start small for debugging
+  batch_size: 64   # Start small for debugging
 
   # Entropy regularization
   learn_entropy: True
@@ -113,13 +113,13 @@ agent:
 trainer:
   class: SequentialTrainer
 
-  timesteps: 100000  # Total training timesteps
+  timesteps: 50000  # Total training timesteps
 
   environment_info: log  # Log environment info
 
   # Checkpoint settings
-  write_interval: 1000  # Save every 1000 timesteps
-  checkpoint_interval: 10000  # Checkpoint every 10000 timesteps
+  write_interval: 500  # Save every 500 timesteps
+  checkpoint_interval: 5000  # Checkpoint every 10000 timesteps
 
   # TensorBoard logging
   wandb: False
