@@ -27,7 +27,7 @@ params:
         fixed_sigma: False
 
     mlp:
-      units: [512, 256]
+      units: [512, 512, 256]  # Same as skrl: 3 hidden layers
       activation: relu
       d2rl: False
 
@@ -51,7 +51,7 @@ params:
     normalize_input: True
     normalize_value: False
     value_bootstrap: True
-    num_actors: ${resolve_default:512,${...num_envs}}
+    num_actors: -1  # -1 means use the number from environment
     reward_shaper:
       scale_value: 1.0
     normalize_advantage: True
@@ -77,8 +77,8 @@ params:
     bounds_loss_coef: 0.0001
 
     # SAC specific parameters
-    batch_size: 4096
-    replay_buffer_size: 1000000
+    batch_size: 128  # Reduced for num_envs=1, scale up for more envs
+    replay_buffer_size: 100000  # Reduced from 1M for faster startup
     actor_lr: 5.0e-4
     critic_lr: 5.0e-4
     alpha_lr: 5.0e-3
