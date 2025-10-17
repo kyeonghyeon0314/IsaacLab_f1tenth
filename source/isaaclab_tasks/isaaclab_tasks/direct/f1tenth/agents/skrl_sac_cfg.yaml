@@ -108,7 +108,7 @@ agent:
 # Replay buffer for SAC
 memory:
   class: RandomMemory
-  memory_size: 1000000
+  memory_size: 10000    #  memory size x num_envs 메모리 계산 out of memory 원인?
 
 
 # Training configuration
