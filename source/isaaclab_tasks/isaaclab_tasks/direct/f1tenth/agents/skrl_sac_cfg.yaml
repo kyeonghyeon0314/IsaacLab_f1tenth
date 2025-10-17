@@ -54,7 +54,8 @@ agent:
     write_interval: 1000
     checkpoint_interval: 10000
 
-  rollouts: 16  # Number of rollouts before updating
+  # SAC-specific: gradient steps per environment interaction
+  gradient_steps: 1  # Number of gradient updates per step (SAC default)
 
   # Discount factor for future rewards
   discount_factor: 0.99
