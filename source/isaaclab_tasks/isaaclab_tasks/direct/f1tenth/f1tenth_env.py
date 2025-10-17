@@ -273,6 +273,16 @@ class F1TenthEnv(DirectRLEnv):
             steering_angle.unsqueeze(-1)   # 1 dimension
         ], dim=-1)  # Total: 2 dimensions
         obs = torch.cat([lidar_distances, vehicle_state], dim=-1)
+
+        # Debug: Print observation shape on first call
+        if not hasattr(self, '_obs_shape_printed'):
+            print(f"[DEBUG] Observation shape: {obs.shape}")
+            print(f"[DEBUG] LiDAR distances shape: {lidar_distances.shape}")
+            print(f"[DEBUG] Vehicle state shape: {vehicle_state.shape}")
+            print(f"[DEBUG] Speed shape: {speed.shape}")
+            print(f"[DEBUG] Steering shape: {steering_angle.unsqueeze(-1).shape}")
+            self._obs_shape_printed = True
+
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
