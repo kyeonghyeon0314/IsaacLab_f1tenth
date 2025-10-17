@@ -57,6 +57,10 @@ agent:
   # SAC-specific: gradient steps per environment interaction
   gradient_steps: 1  # Number of gradient updates per step (SAC default)
 
+  # Memory/rollouts: SAC doesn't use rollouts but skrl Runner requires it for memory_size calculation
+  # This is a workaround for skrl's internal memory allocation
+  rollouts: 1  # Dummy value (SAC uses replay buffer instead)
+
   # Discount factor for future rewards
   discount_factor: 0.99
 
