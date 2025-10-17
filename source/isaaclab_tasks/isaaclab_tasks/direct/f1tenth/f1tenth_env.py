@@ -74,8 +74,8 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     action_scale_velocity = 9.51
     action_space = 2
 
-    # Observation space
-    observation_space = 1080 + 6
+    # Observation space (LiDAR + vehicle_state)
+    observation_space = 1080 + 2  # LiDAR(1080) + speed(1) + steering(1)
     state_space = 0
 
     # Vehicle parameters (from f1tenth_gym and actual hardware)
@@ -264,9 +264,14 @@ class F1TenthEnv(DirectRLEnv):
             steering_angle = joint_pos[:, self._steering_joint_ids[0]]
         else:
             steering_angle = torch.zeros(joint_pos.shape[0], device=self.device)
+
+        # Calculate speed as scalar from velocity vector (user requirement: only speed + steering)
+        speed = torch.norm(vel[:, :2], dim=-1, keepdim=True)
+
         vehicle_state = torch.cat([
-            vel[:, 0:2], ang_vel[:, 2:3], steering_angle.unsqueeze(-1), pos[:, 0:2]
-        ], dim=-1)
+            speed,                         # 1 dimension
+            steering_angle.unsqueeze(-1)   # 1 dimension
+        ], dim=-1)  # Total: 2 dimensions
         obs = torch.cat([lidar_distances, vehicle_state], dim=-1)
         return {"policy": obs}
 

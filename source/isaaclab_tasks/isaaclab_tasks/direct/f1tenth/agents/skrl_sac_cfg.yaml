@@ -71,24 +71,24 @@ agent:
   # State preprocessing
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs:
-    size: 1086  # LiDAR(1080) + vehicle_state(6)
+    size: 1082  # LiDAR(1080) + vehicle_state(2: speed + steering)
     epsilon: 1.0e-8
 
   # Reward scaling
   value_preprocessor: RunningStandardScaler
   value_preprocessor_kwargs: null
 
-  # Random timesteps for exploration
-  random_timesteps: 10000
+  # Random timesteps for exploration (reduced for num_envs=1)
+  random_timesteps: 5000  # 10000 → 5000
 
   # Learning starts after this many steps
-  learning_starts: 10000
+  learning_starts: 5000  # 10000 → 5000
 
   # Gradient steps per update
   grad_norm_clip: 1.0
 
   # Batch size for training
-  batch_size: 4096
+  batch_size: 2048   # 4096 최적
 
   # Entropy regularization
   learn_entropy: True
@@ -99,8 +99,8 @@ agent:
   # Rewards shaping
   rewards_shaper: null
 
-  # Replay buffer
-  replay_buffer_size: 1000000
+  # Replay buffer (reduced for 8GB GPU)
+  replay_buffer_size: 100000  # 1M → 100K (10x reduction for 8GB GPU)
   replay_buffer_class: RandomMemory
   replay_buffer_kwargs: null
 
