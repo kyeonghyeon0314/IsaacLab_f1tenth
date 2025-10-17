@@ -11,6 +11,10 @@ params:
   model:
     name: soft_actor_critic
 
+  env:
+    clip_observations: 5.0
+    clip_actions: 1.0
+
   network:
     name: actor_critic
     separate: True  # SAC requires separate actor and critic networks
