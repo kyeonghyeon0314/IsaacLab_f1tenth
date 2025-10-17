@@ -93,7 +93,7 @@ agent:
 
   # Batch size for training (scale with num_envs)
   # num_envs=1 → 128, num_envs=512 → 2048, num_envs=1024 → 4096
-  batch_size: 64   # Start small for debugging
+  batch_size: 2048
 
   # Entropy regularization
   learn_entropy: True
@@ -104,10 +104,13 @@ agent:
   # Rewards shaping
   rewards_shaper: null
 
-  # Replay buffer (reduced for 8GB GPU)
-  replay_buffer_size: 1000000  # 1M → 100K (10x reduction for 8GB GPU)
-  replay_buffer_class: RandomMemory
-  replay_buffer_kwargs: null
+
+# Replay buffer for SAC
+memory:
+  class: RandomMemory
+  memory_size: 1000000
+  kwargs: {}
+
 
 # Training configuration
 trainer:
