@@ -109,7 +109,6 @@ agent:
 memory:
   class: RandomMemory
   memory_size: 1000000
-  kwargs: {}
 
 
 # Training configuration
