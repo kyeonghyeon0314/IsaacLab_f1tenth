@@ -72,3 +72,17 @@ kill -9 3270
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 5
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 1
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 10
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 2
+./isaaclab.sh -p -c "import skrl; print('skrl version:', skrl.__version__); print('skrl location:', skrl.__file__)"
+find /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/skrl -name "*.py" -path "*/model_instantiators/*" -type f
+head -100 /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/skrl/utils/model_instantiators/torch/deterministic.py
+grep -A 30 "def generate_containers" /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/skrl/utils/model_instantiators/torch/common.py | head -50
+grep -B 5 -A 20 "def _parse_input" /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/skrl/utils/model_instantiators/torch/common.py
+grep -A 50 "def _parse_input" /workspace/isaaclab/_isaac_sim/kit/python/lib/python3.11/site-packages/skrl/utils/model_instantiators/torch/common.py | head -70
+ps aux
+kill -9 34775
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 2
+ps aux
+kill -9 35153
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1
