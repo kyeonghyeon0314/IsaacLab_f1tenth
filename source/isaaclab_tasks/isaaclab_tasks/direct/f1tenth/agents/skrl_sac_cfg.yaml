@@ -88,7 +88,7 @@ agent:
   grad_norm_clip: 1.0
 
   # Batch size for training
-  batch_size: 4096   # 4096 최적
+  batch_size: 516   # 4096 최적
 
   # Entropy regularization
   learn_entropy: True
