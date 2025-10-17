@@ -7,7 +7,7 @@ seed: 42
 # Models are instantiated using skrl's model instantiator utility
 # https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
 models:
-  separate: False
+  separate: True  # SAC requires separate models (policy, critic_1, critic_2)
 
   policy:  # Actor network
     class: GaussianMixin
@@ -21,45 +21,38 @@ models:
         input: STATES  # LiDAR + vehicle state
         layers: [512, 512, 256]
         activations: relu
-      - name: mean_layer
-        input: net
-        layers: [ACTIONS]  # Output: [steering_vel, acceleration]
-        activations: tanh
-      - name: log_std_layer
-        input: net
-        layers: [ACTIONS]
-        activations: ""
+    output: ACTIONS
 
   critic_1:  # First Q-network
     class: DeterministicMixin
     clip_actions: False
     network:
       - name: net
-        input: [STATES, ACTIONS]
+        input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
         layers: [512, 512, 256]
         activations: relu
-      - name: output_layer
-        input: net
-        layers: [1]
-        activations: ""
-
+    output: ONE
   critic_2:  # Second Q-network (for double Q-learning)
     class: DeterministicMixin
     clip_actions: False
     network:
       - name: net
-        input: [STATES, ACTIONS]
+        input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
         layers: [512, 512, 256]
         activations: relu
-      - name: output_layer
-        input: net
-        layers: [1]
-        activations: ""
+    output: ONE
 
 # SAC agent configuration
 # https://skrl.readthedocs.io/en/latest/api/agents/sac.html
 agent:
   class: SAC
+
+  # Experiment configuration
+  experiment:
+    directory: f1tenth_sac
+    experiment_name: ""
+    write_interval: 1000
+    checkpoint_interval: 10000
 
   rollouts: 16  # Number of rollouts before updating
 

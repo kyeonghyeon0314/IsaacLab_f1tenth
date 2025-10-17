@@ -66,7 +66,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     )
 
     # Environment settings
-    episode_length_s = 20.0
+    episode_length_s = 10.0  # Reduced from 20.0 to encourage faster driving
     decimation = 2
 
     # Action space
@@ -163,6 +163,10 @@ class F1TenthEnv(DirectRLEnv):
         self.action_scale_velocity = torch.tensor([cfg.action_scale_velocity], device=self.device)
         self.previous_pos = torch.zeros(self.num_envs, 3, device=self.device)
 
+        # Reward calculation variables
+        self.previous_steering = torch.zeros(self.num_envs, device=self.device)  # For steering stability
+        self.lidar_distances = None  # Store LiDAR distances for reward calculation
+
         # Motor control: velocity integration (VESC-style)
         self.wheel_radius = cfg.vehicle_params["wheel_radius"]
         self.velocity_damping = cfg.motor_control["velocity_damping"]
@@ -171,9 +175,9 @@ class F1TenthEnv(DirectRLEnv):
         self.target_velocity = torch.zeros(self.num_envs, device=self.device)
 
         # Stuck detection: track position for movement check
-        # Check if vehicle hasn't moved 1m in 1 second (60 steps at 60Hz)
-        self.stuck_check_interval = 60  # steps
-        self.stuck_threshold = 1.0  # meters
+        # Check if vehicle hasn't moved 0.5m in 0.5 seconds (30 steps at 60Hz)
+        self.stuck_check_interval = 30  # steps (reduced from 60)
+        self.stuck_threshold = 0.5  # meters (reduced from 1.0)
         self.last_check_pos = torch.zeros(self.num_envs, 2, device=self.device)  # XY position
         self.steps_since_last_check = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
@@ -249,6 +253,10 @@ class F1TenthEnv(DirectRLEnv):
     def _get_observations(self) -> dict:
         lidar_data = self.lidar.data.ray_hits_w[..., :3]
         lidar_distances = torch.norm(lidar_data - self.lidar.data.pos_w.unsqueeze(1), dim=-1)
+
+        # Store LiDAR distances for reward calculation
+        self.lidar_distances = lidar_distances
+
         root_state = self.robot.data.root_state_w
         pos, vel, ang_vel = root_state[:, :3], root_state[:, 7:10], root_state[:, 10:13]
         joint_pos = self.robot.data.joint_pos
@@ -263,20 +271,66 @@ class F1TenthEnv(DirectRLEnv):
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        pos, vel = self.robot.data.root_state_w[:, :3], self.robot.data.root_state_w[:, 7:10]
-        reward_alive = self.cfg.rew_scale_alive
-        progress = torch.norm(pos[:, :2] - self.previous_pos[:, :2], dim=-1)
-        reward_progress = self.cfg.rew_scale_progress * progress
-        forward_vel = vel[:, 0]
-        reward_velocity = self.cfg.rew_scale_velocity * torch.clamp(forward_vel, 0.0, 10.0)
+        """
+        Redesigned reward function:
+        - Forward progress (50%): Distance traveled in velocity direction
+        - Forward speed (10%): Fast driving encouragement
+        - Collision penalty (30%): Based on minimum LiDAR distance
+        - Steering stability (10%): Penalize abrupt steering changes
+        """
+        pos = self.robot.data.root_state_w[:, :3]
+        vel = self.robot.data.root_state_w[:, 7:10]
+
+        # Get current steering angle
         joint_pos = self.robot.data.joint_pos
         if len(self._steering_joint_ids) > 0 and self._steering_joint_ids[0] < joint_pos.shape[1]:
-            steering_angle = joint_pos[:, self._steering_joint_ids[0]]
+            current_steering = joint_pos[:, self._steering_joint_ids[0]]
         else:
-            steering_angle = torch.zeros(joint_pos.shape[0], device=self.device)
-        reward_steering = self.cfg.rew_scale_steering * torch.abs(steering_angle)
-        reward = reward_alive + reward_progress + reward_velocity + reward_steering
+            current_steering = torch.zeros(self.num_envs, device=self.device)
+
+        # 1) Forward progress reward (50%)
+        # Only reward movement in the current velocity direction
+        displacement = pos[:, :2] - self.previous_pos[:, :2]  # XY plane displacement
+        vel_xy = vel[:, :2]  # XY plane velocity
+        speed = torch.norm(vel_xy, dim=-1, keepdim=True) + 1e-6
+        forward_direction = vel_xy / speed  # Normalized velocity direction
+
+        # Project displacement onto forward direction
+        forward_progress = torch.sum(displacement * forward_direction, dim=-1)
+        forward_progress = torch.clamp(forward_progress, 0.0, 1.0)  # Clamp to [0, 1m]
+        reward_forward = 0.5 * forward_progress
+
+        # 2) Forward speed reward (10%)
+        # Encourage fast driving, normalized to max 10 m/s
+        forward_speed = speed.squeeze(-1)
+        reward_speed = 0.1 * torch.clamp(forward_speed / 10.0, 0.0, 1.0)
+
+        # 3) Collision penalty (30%)
+        # Penalize when minimum LiDAR distance is below threshold (0.2m)
+        if self.lidar_distances is not None:
+            min_lidar_dist = torch.min(self.lidar_distances, dim=-1)[0]
+            collision_threshold = 0.2  # 20cm
+            collision_penalty = torch.where(
+                min_lidar_dist < collision_threshold,
+                -0.3 * (collision_threshold - min_lidar_dist) / collision_threshold,  # Distance-proportional penalty
+                torch.zeros_like(min_lidar_dist)
+            )
+        else:
+            collision_penalty = torch.zeros(self.num_envs, device=self.device)
+
+        # 4) Steering stability reward (10%)
+        # Penalize abrupt steering changes to prevent rolling
+        steering_change = torch.abs(current_steering - self.previous_steering)
+        max_steering_change = 0.05  # Max 0.05 rad change per step
+        steering_penalty = -0.1 * torch.clamp(steering_change / max_steering_change, 0.0, 1.0)
+
+        # Total reward
+        reward = reward_forward + reward_speed + collision_penalty + steering_penalty
+
+        # Update state for next step
         self.previous_pos[:] = pos
+        self.previous_steering[:] = current_steering
+
         return reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -285,6 +339,12 @@ class F1TenthEnv(DirectRLEnv):
 
         # Termination conditions
         out_of_bounds = torch.norm(pos[:, :2], dim=-1) > 50.0
+
+        # Collision detection: terminate if minimum LiDAR distance < 0.2m
+        collision = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        if self.lidar_distances is not None:
+            min_lidar_dist = torch.min(self.lidar_distances, dim=-1)[0]
+            collision = min_lidar_dist < 0.2  # 20cm collision threshold
 
         # Stuck detection: check if vehicle hasn't moved enough in XY plane
         self.steps_since_last_check += 1
@@ -304,7 +364,7 @@ class F1TenthEnv(DirectRLEnv):
                 wheel_radius = 0.0508  # F1tenth wheel radius in meters
                 current_wheel_pos = self.robot.data.joint_pos[:, self._rear_wheel_ids]
 
-                # Calculate wheel rotation change over 60 steps (not just 1 step!)
+                # Calculate wheel rotation change over check interval (not just 1 step!)
                 wheel_delta = current_wheel_pos - self.wheel_pos_at_last_check
 
                 # Calculate wheel odometry from rotation change
@@ -335,7 +395,7 @@ class F1TenthEnv(DirectRLEnv):
                     print(f"  Last Check Position: X={last_check_xy[0].item():.3f}, Y={last_check_xy[1].item():.3f}")
                     print(f"  GT Distance (current - last): {gt_distance:.3f}m")
                     print(f"  Movement variable: {movement_dist:.3f}m (should match GT)")
-                    print(f"  Wheel odometry (60 steps): {wheel_dist:.3f}m")
+                    print(f"  Wheel odometry ({self.stuck_check_interval} steps): {wheel_dist:.3f}m")
                     print(f"  Slip ratio: {slip_ratio:.2%}")
 
                     # Validation check
@@ -350,15 +410,17 @@ class F1TenthEnv(DirectRLEnv):
             current_wheel_pos_all = self.robot.data.joint_pos[:, self._rear_wheel_ids]
             self.wheel_pos_at_last_check[check_now] = current_wheel_pos_all[check_now]
 
-        terminated = out_of_bounds | stuck
+        terminated = out_of_bounds | collision | stuck
 
         # Debug logging: print termination reasons when any environment terminates
         if terminated.any():
             env_idx = torch.where(terminated)[0]
             for idx in env_idx:
+                min_lidar = torch.min(self.lidar_distances[idx]).item() if self.lidar_distances is not None else 0.0
                 print(f"\n[TERMINATION DEBUG] Env {idx.item()} terminated at step {self.episode_length_buf[idx].item()}:")
                 print(f"  Position: X={pos[idx, 0].item():.3f}, Y={pos[idx, 1].item():.3f}, Z={pos[idx, 2].item():.3f}")
                 print(f"  Velocity: vx={vel[idx, 0].item():.3f}, vy={vel[idx, 1].item():.3f}, vz={vel[idx, 2].item():.3f}")
+                print(f"  Collision (LiDAR < 0.2m): {collision[idx].item()} | Min LiDAR: {min_lidar:.3f}m")
                 print(f"  Out of bounds (dist > 50m): {out_of_bounds[idx].item()} | Distance: {torch.norm(pos[idx, :2]).item():.2f}m")
                 print(f"  Stuck (moved < {self.stuck_threshold}m in {self.stuck_check_interval} steps): {stuck[idx].item()}")
                 print(f"  Time out: {time_out[idx].item()} | Step: {self.episode_length_buf[idx].item()}/{self.max_episode_length-1}")
@@ -412,6 +474,9 @@ class F1TenthEnv(DirectRLEnv):
 
         # Update previous position tracker
         self.previous_pos[env_ids] = default_root_state[:, :3]
+
+        # Reset previous steering for reward calculation
+        self.previous_steering[env_ids] = 0.0
 
         # Reset motor control state
         self.target_velocity[env_ids] = 0.0
