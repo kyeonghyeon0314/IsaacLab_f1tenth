@@ -119,6 +119,15 @@ if args_cli.agent is None:
     agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm in ["ppo"] else f"skrl_{algorithm}_cfg_entry_point"
 else:
     agent_cfg_entry_point = args_cli.agent
+    # Extract algorithm name from agent_cfg_entry_point (e.g., "skrl_sac_cfg_entry_point" -> "sac")
+    if "sac" in agent_cfg_entry_point.lower():
+        algorithm = "sac"
+    elif "ppo" in agent_cfg_entry_point.lower():
+        algorithm = "ppo"
+    elif "amp" in agent_cfg_entry_point.lower():
+        algorithm = "amp"
+    else:
+        algorithm = "custom"  # Fallback for unknown algorithms
 
 
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
