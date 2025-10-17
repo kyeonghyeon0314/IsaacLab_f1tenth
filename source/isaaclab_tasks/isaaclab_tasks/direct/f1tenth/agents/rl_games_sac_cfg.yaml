@@ -44,6 +44,8 @@ params:
   config:
     name: f1tenth_sac
     full_experiment_name: ${.name}
+    device: cuda:3  # GPU device
+    device_name: cuda
     env_name: rlgpu
     multi_gpu: False
     ppo: False
