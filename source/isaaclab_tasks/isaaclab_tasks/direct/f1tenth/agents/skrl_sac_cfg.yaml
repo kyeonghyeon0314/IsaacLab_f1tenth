@@ -79,16 +79,16 @@ agent:
   value_preprocessor_kwargs: null
 
   # Random timesteps for exploration (reduced for num_envs=1)
-  random_timesteps: 10000  # 10000 → 5000
+  random_timesteps: 500  # Minimal for quick start
 
   # Learning starts after this many steps
-  learning_starts: 5000  # 10000 → 5000
+  learning_starts: 500  # Start learning quickly
 
   # Gradient steps per update
   grad_norm_clip: 1.0
 
   # Batch size for training
-  batch_size: 516   # 4096 최적
+  batch_size: 128   # Reduced for num_envs=1 (was 516)
 
   # Entropy regularization
   learn_entropy: True
