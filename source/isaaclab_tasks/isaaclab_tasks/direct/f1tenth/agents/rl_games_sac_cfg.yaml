@@ -1,0 +1,90 @@
+# RL-Games SAC configuration for F1TENTH racing
+# Based on IsaacGymEnvs AntSAC configuration
+# https://github.com/isaac-sim/IsaacGymEnvs/blob/main/isaacgymenvs/cfg/train/AntSAC.yaml
+
+params:
+  seed: 42
+
+  algo:
+    name: sac  # Soft Actor-Critic algorithm
+
+  model:
+    name: soft_actor_critic
+
+  network:
+    name: actor_critic
+    separate: True  # SAC requires separate actor and critic networks
+
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0.0
+        fixed_sigma: False
+
+    mlp:
+      units: [512, 256]
+      activation: relu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    log_std_bounds: [-5, 2]
+
+  load_checkpoint: False
+  load_path: ""
+
+  config:
+    name: f1tenth_sac
+    full_experiment_name: ${.name}
+    env_name: rlgpu
+    multi_gpu: False
+    ppo: False
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: False
+    value_bootstrap: True
+    num_actors: ${resolve_default:512,${...num_envs}}
+    reward_shaper:
+      scale_value: 1.0
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.005
+    learning_rate: 3.0e-4
+    lr_schedule: None
+    score_to_win: 20000
+    max_epochs: 20000
+    save_best_after: 50
+    save_frequency: 500
+    print_stats: True
+    grad_norm: 1.0
+    entropy_coef: 0.0
+    truncate_grads: True
+    e_clip: 0.2
+    horizon_length: 16
+    minibatch_size: 4096
+    mini_epochs: 8
+    critic_coef: 4
+    clip_value: True
+    seq_len: 4
+    bounds_loss_coef: 0.0001
+
+    # SAC specific parameters
+    batch_size: 4096
+    replay_buffer_size: 1000000
+    actor_lr: 5.0e-4
+    critic_lr: 5.0e-4
+    alpha_lr: 5.0e-3
+    init_alpha: 1.0
+    critic_tau: 0.005
+    learnable_temperature: True
+    steps_num: 8
+    seed_steps: 5
+    warmup_steps: 10
