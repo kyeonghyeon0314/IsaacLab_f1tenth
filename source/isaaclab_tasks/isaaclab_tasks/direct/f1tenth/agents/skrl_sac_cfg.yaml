@@ -78,17 +78,18 @@ agent:
   value_preprocessor: RunningStandardScaler
   value_preprocessor_kwargs: null
 
-  # Random timesteps for exploration (reduced for num_envs=1)
-  random_timesteps: 500  # Minimal for quick start
+  # Random timesteps for exploration
+  random_timesteps: 5000  # Increased for parallel envs
 
   # Learning starts after this many steps
-  learning_starts: 500  # Start learning quickly
+  learning_starts: 5000
 
   # Gradient steps per update
   grad_norm_clip: 1.0
 
-  # Batch size for training
-  batch_size: 128   # Reduced for num_envs=1 (was 516)
+  # Batch size for training (scale with num_envs)
+  # num_envs=512 → 2048, num_envs=1024 → 4096, num_envs=2048 → 8192
+  batch_size: 4096   # Optimal for num_envs=1024
 
   # Entropy regularization
   learn_entropy: True
