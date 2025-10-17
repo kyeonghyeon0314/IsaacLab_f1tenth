@@ -67,11 +67,10 @@ agent:
   # Polyak averaging factor for target networks
   polyak: 0.005
 
-  # Learning rates
+  # Learning rates (SAC typically uses fixed learning rate)
   learning_rate: 3.0e-4
-  learning_rate_scheduler: KLAdaptiveLR
-  learning_rate_scheduler_kwargs:
-    kl_threshold: 0.008
+  learning_rate_scheduler: null  # SAC doesn't need PPO's KLAdaptiveLR
+  learning_rate_scheduler_kwargs: {}
 
   # State preprocessing
   state_preprocessor: RunningStandardScaler
