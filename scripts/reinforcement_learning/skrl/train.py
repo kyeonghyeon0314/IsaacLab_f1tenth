@@ -51,7 +51,7 @@ parser.add_argument(
     "--algorithm",
     type=str,
     default="PPO",
-    choices=["AMP", "PPO", "IPPO", "MAPPO"],
+    choices=["AMP", "PPO", "IPPO", "MAPPO", "SAC"],
     help="The RL algorithm used for training the skrl agent.",
 )
 
@@ -119,7 +119,7 @@ if args_cli.agent is None:
     agent_cfg_entry_point = "skrl_cfg_entry_point" if algorithm in ["ppo"] else f"skrl_{algorithm}_cfg_entry_point"
 else:
     agent_cfg_entry_point = args_cli.agent
-    # Extract algorithm name from agent_cfg_entry_point (e.g., "skrl_sac_cfg_entry_point" -> "sac")
+    # Extract algorithm from entry point or use default
     if "sac" in agent_cfg_entry_point.lower():
         algorithm = "sac"
     elif "ppo" in agent_cfg_entry_point.lower():
@@ -127,7 +127,7 @@ else:
     elif "amp" in agent_cfg_entry_point.lower():
         algorithm = "amp"
     else:
-        algorithm = "custom"  # Fallback for unknown algorithms
+        algorithm = args_cli.algorithm.lower() if args_cli.algorithm else "unknown"
 
 
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
