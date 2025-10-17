@@ -22,6 +22,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.f1tenth_env:F1TenthEnvCfg",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_sac_cfg.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_sac_cfg.yaml",  # Default (for PPO fallback)
+        "skrl_sac_cfg_entry_point": f"{agents.__name__}:skrl_sac_cfg.yaml",  # SAC specific
     },
 )
