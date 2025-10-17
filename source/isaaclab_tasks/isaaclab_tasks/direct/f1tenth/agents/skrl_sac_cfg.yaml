@@ -79,17 +79,17 @@ agent:
   value_preprocessor_kwargs: null
 
   # Random timesteps for exploration
-  random_timesteps: 5000  # Increased for parallel envs
+  random_timesteps: 500  # Start small for debugging
 
   # Learning starts after this many steps
-  learning_starts: 5000
+  learning_starts: 500
 
   # Gradient steps per update
   grad_norm_clip: 1.0
 
   # Batch size for training (scale with num_envs)
-  # num_envs=512 → 2048, num_envs=1024 → 4096, num_envs=2048 → 8192
-  batch_size: 4096   # Optimal for num_envs=1024
+  # num_envs=1 → 128, num_envs=512 → 2048, num_envs=1024 → 4096
+  batch_size: 128   # Start small for debugging
 
   # Entropy regularization
   learn_entropy: True
