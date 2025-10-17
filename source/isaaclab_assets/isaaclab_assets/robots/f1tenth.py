@@ -65,7 +65,7 @@ F1TENTH_CFG = ArticulationCfg(
             effort_limit_sim=10.0,  # Motor torque limit
             velocity_limit=196.0,  # Max wheel angular velocity (10 m/s / 0.0508 m)
             stiffness=0.0,  # Velocity control mode
-            damping=0.5,
+            damping=0.01,  # Reduced from 0.5 for better velocity tracking
         ),
         # Servo Steering (Ackermann) - Position Control
         "steering": ImplicitActuatorCfg(

@@ -69,3 +69,6 @@ kill -9 3270
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 5
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 1
 ./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 3
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 5
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 1
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 10

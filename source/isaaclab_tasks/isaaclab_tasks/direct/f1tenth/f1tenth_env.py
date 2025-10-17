@@ -178,7 +178,8 @@ class F1TenthEnv(DirectRLEnv):
         self.steps_since_last_check = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
         # Slip detection: track wheel rotation for odometry calculation
-        self.previous_wheel_pos = torch.zeros(self.num_envs, len(self._rear_wheel_ids), device=self.device)
+        # Store wheel position at last stuck check (not every step)
+        self.wheel_pos_at_last_check = torch.zeros(self.num_envs, len(self._rear_wheel_ids), device=self.device)
 
     def _setup_scene(self):
         """Setup the simulation scene."""
@@ -303,30 +304,51 @@ class F1TenthEnv(DirectRLEnv):
                 wheel_radius = 0.0508  # F1tenth wheel radius in meters
                 current_wheel_pos = self.robot.data.joint_pos[:, self._rear_wheel_ids]
 
-                # Calculate wheel rotation change (delta angle) for stuck environments
-                wheel_delta = current_wheel_pos - self.previous_wheel_pos
+                # Calculate wheel rotation change over 60 steps (not just 1 step!)
+                wheel_delta = current_wheel_pos - self.wheel_pos_at_last_check
 
                 # Calculate wheel odometry from rotation change
                 wheel_odometry = torch.mean(torch.abs(wheel_delta), dim=-1) * wheel_radius
 
+                # Verification: Calculate actual distance using GT positions
+                # This validates both wheel odometry and position tracking
                 stuck_env_idx = torch.where(stuck)[0]
                 for idx in stuck_env_idx:
-                    # Slip ratio: (wheel_distance - actual_distance) / wheel_distance
+                    # Current position
+                    current_xy = pos[idx, :2]
+                    last_check_xy = self.last_check_pos[idx]
+
+                    # GT-based distance (ground truth)
+                    gt_distance = torch.norm(current_xy - last_check_xy).item()
+
+                    # Wheel-based distance (odometry)
                     wheel_dist = wheel_odometry[idx].item()
-                    actual_dist = movement[idx].item()
-                    slip_ratio = (wheel_dist - actual_dist) / (wheel_dist + 1e-6)
+
+                    # Compare with movement (should be same as gt_distance)
+                    movement_dist = movement[idx].item()
+
+                    # Slip ratio: (wheel_distance - actual_distance) / wheel_distance
+                    slip_ratio = (wheel_dist - gt_distance) / (wheel_dist + 1e-6)
 
                     print(f"\n[STUCK DETECTION] Env {idx.item()} at step {self.episode_length_buf[idx].item()}:")
-                    print(f"  Position: X={pos[idx, 0].item():.3f}, Y={pos[idx, 1].item():.3f}, Z={pos[idx, 2].item():.3f}")
-                    print(f"  Movement in {self.stuck_check_interval} steps: {actual_dist:.3f}m (threshold: {self.stuck_threshold}m)")
-                    print(f"  Wheel odometry: {wheel_dist:.3f}m | Actual distance: {actual_dist:.3f}m | Slip ratio: {slip_ratio:.2%}")
+                    print(f"  Current Position: X={current_xy[0].item():.3f}, Y={current_xy[1].item():.3f}, Z={pos[idx, 2].item():.3f}")
+                    print(f"  Last Check Position: X={last_check_xy[0].item():.3f}, Y={last_check_xy[1].item():.3f}")
+                    print(f"  GT Distance (current - last): {gt_distance:.3f}m")
+                    print(f"  Movement variable: {movement_dist:.3f}m (should match GT)")
+                    print(f"  Wheel odometry (60 steps): {wheel_dist:.3f}m")
+                    print(f"  Slip ratio: {slip_ratio:.2%}")
 
-            # Update last check position and reset counter for checked envs
+                    # Validation check
+                    if abs(gt_distance - movement_dist) > 0.001:
+                        print(f"  ⚠️  WARNING: GT distance and movement mismatch! Diff: {abs(gt_distance - movement_dist):.6f}m")
+
+            # Update last check position and wheel position for checked envs only
             self.last_check_pos[check_now] = current_pos_xy[check_now]
             self.steps_since_last_check[check_now] = 0
 
-        # Update previous wheel position for next iteration
-        self.previous_wheel_pos[:] = self.robot.data.joint_pos[:, self._rear_wheel_ids]
+            # Update wheel position at check time (not every step!)
+            current_wheel_pos_all = self.robot.data.joint_pos[:, self._rear_wheel_ids]
+            self.wheel_pos_at_last_check[check_now] = current_wheel_pos_all[check_now]
 
         terminated = out_of_bounds | stuck
 
@@ -399,4 +421,4 @@ class F1TenthEnv(DirectRLEnv):
         self.steps_since_last_check[env_ids] = 0
 
         # Reset wheel position tracker for slip detection
-        self.previous_wheel_pos[env_ids] = self.robot.data.joint_pos[env_ids][:, self._rear_wheel_ids]
+        self.wheel_pos_at_last_check[env_ids] = self.robot.data.joint_pos[env_ids][:, self._rear_wheel_ids]
