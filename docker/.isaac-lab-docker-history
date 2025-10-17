@@ -100,3 +100,4 @@ ps aux
 kill -9 38270
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1 --headless
 ./isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py --task Isaac-F1tenth-Direct-v0 --device cuda:0 --num_envs 1 --headless
+ps aux

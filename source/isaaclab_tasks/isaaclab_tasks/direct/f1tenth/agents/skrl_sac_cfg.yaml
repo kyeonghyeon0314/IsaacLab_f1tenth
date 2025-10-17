@@ -19,7 +19,7 @@ models:
     network:
       - name: net
         input: STATES  # LiDAR + vehicle state
-        layers: [256, 256, 128]
+        layers: [512, 512, 256]
         activations: relu
     output: ACTIONS
 
@@ -29,7 +29,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 256, 128]
+        layers: [512, 512, 256]
         activations: relu
     output: ONE
   critic_2:  # Second Q-network (for double Q-learning)
@@ -38,7 +38,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 256, 128]
+        layers: [512, 512, 256]
         activations: relu
     output: ONE
 
