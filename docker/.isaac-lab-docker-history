@@ -86,3 +86,16 @@ kill -9 34775
 ps aux
 kill -9 35153
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1
+ps aux
+kill -9 37272
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1 --headless
+ps aux
+kill -9 37478
+ps aux
+kill -9 37684
+ps aux
+kill -9 37890
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1 
+ps aux
+kill -9 38270
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1 --headless
