@@ -101,3 +101,18 @@ kill -9 38270
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --num_envs 1 --headless
 ./isaaclab.sh -p scripts/reinforcement_learning/rl_games/train.py --task Isaac-F1tenth-Direct-v0 --device cuda:0 --num_envs 1 --headless
 ps aux
+kill -9 41249
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --agent skrl_sac_cfg_entry_point --algorithm SAC --device cuda:0 --num_envs 32
+ps aux
+kill -9 41646
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --agent skrl_sac_cfg_entry_point --algorithm SAC --device cuda:0 --num_envs 1
+ls -t /isaac-sim/kit/logs/Kit/Isaac-Sim/5.0/ | head -n 1 
+tail -n 100 /isaac-sim/kit/logs/Kit/Isaac-Sim/5.0/kit_20251017_174503.log
+rm -rf /root/.cache/ov /root/.local/share/ov
+ps aux | grep kit  
+rm -rf ~/.cache/ov ~/.local/share/ov
+rm -rf /root/.cache/ov /root/.local/share/ov 
+watch nvidia-smi
+ps aux
+kill -9 69
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --agent skrl_sac_cfg_entry_point --algorithm SAC --device cuda:0 --num_envs 32
