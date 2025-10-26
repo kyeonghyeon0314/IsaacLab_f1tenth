@@ -19,8 +19,8 @@ models:
     network:
       - name: net
         input: STATES  # LiDAR + vehicle state
-        layers: [512, 128, 128, 64, 2]
-        activations: [relu,relu, relu, relu, tanh]
+        layers: [64, 64, 2]
+        activations: [relu,relu, tanh]
         output: ACTIONS  # 2D 출력
 
   critic_1:  # First Q-network
@@ -29,7 +29,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 128, 64]
+        layers: [256, 128, 128]
         activations: relu
         output: ONE
 
@@ -39,8 +39,8 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 128, 64]
-        activations: [relu, relu, relu]
+        layers: [256, 128, 128]
+        activations: relu
         output: ONE
 
   target_critic_1:  # Target network for critic_1 (Polyak averaging)
@@ -49,8 +49,8 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS
-        layers: [256, 128, 64]
-        activations: [relu, relu, relu]
+        layers: [256, 128, 128]
+        activations: relu
         output: ONE
 
   target_critic_2:  # Target network for critic_2 (Polyak averaging)
@@ -59,8 +59,8 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS
-        layers: [256, 128, 64]
-        activations: [relu, relu, relu]
+        layers: [256, 128, 128]
+        activations: relu
         output: ONE
 
 # SAC agent configuration

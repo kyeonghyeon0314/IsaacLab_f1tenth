@@ -215,17 +215,108 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
 
-    # configure and instantiate the skrl runner
-    # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
-    runner = Runner(env, agent_cfg)
+    # ========== F1TENTH: Manual setup with CNN+MLP models ==========
+    # skrl Runner doesn't support custom model paths, so we manually create agent/trainer
+    use_custom_f1tenth_models = args_cli.task == "Isaac-F1tenth-Direct-v0"
 
-    # load checkpoint (if specified)
-    if resume_path:
-        print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        runner.agent.load(resume_path)
+    if use_custom_f1tenth_models:
+        try:
+            from skrl.agents.torch.sac import SAC, SAC_DEFAULT_CONFIG
+            from skrl.trainers.torch import SequentialTrainer
+            from skrl.memories.torch import RandomMemory
+            from skrl.resources.preprocessors.torch import RunningStandardScaler
+            from isaaclab_tasks.direct.f1tenth.models import CNNMLPPolicy, CNNMLPCritic
 
-    # run training
-    runner.run()
+            print("[INFO] Using CNN+MLP hybrid models for F1TENTH (TinyLidarNet architecture)")
+            print("       - LiDAR: 1080 → 1D CNN → 64 features")
+            print("       - Policy MLP: 66 → 64 → 64 → 2")
+            print("       - Critic MLP: 68 → 256 → 128 → 64 → 1")
+
+            # Create custom models directly
+            device = env.device
+            models = {}
+
+            # Policy
+            models["policy"] = CNNMLPPolicy(
+                observation_space=env.observation_space,
+                action_space=env.action_space,
+                device=device,
+                clip_actions=agent_cfg["models"]["policy"]["clip_actions"],
+                clip_log_std=agent_cfg["models"]["policy"]["clip_log_std"],
+                min_log_std=agent_cfg["models"]["policy"]["min_log_std"],
+                max_log_std=agent_cfg["models"]["policy"]["max_log_std"],
+                initial_log_std=agent_cfg["models"]["policy"]["initial_log_std"]
+            )
+
+            # Critics
+            for critic_name in ["critic_1", "critic_2", "target_critic_1", "target_critic_2"]:
+                models[critic_name] = CNNMLPCritic(
+                    observation_space=env.observation_space,
+                    action_space=env.action_space,
+                    device=device,
+                    clip_actions=agent_cfg["models"][critic_name]["clip_actions"]
+                )
+
+            # Create memory
+            memory = RandomMemory(
+                memory_size=agent_cfg["memory"]["memory_size"],
+                num_envs=env.num_envs,
+                device=device
+            )
+
+            # Create SAC agent with custom models
+            agent_cfg_sac = SAC_DEFAULT_CONFIG.copy()
+            agent_cfg_sac.update(agent_cfg["agent"])
+            agent_cfg_sac["state_preprocessor"] = RunningStandardScaler
+            agent_cfg_sac["state_preprocessor_kwargs"] = agent_cfg["agent"]["state_preprocessor_kwargs"]
+
+            agent = SAC(
+                models=models,
+                memory=memory,
+                cfg=agent_cfg_sac,
+                observation_space=env.observation_space,
+                action_space=env.action_space,
+                device=device
+            )
+
+            # Create trainer
+            trainer_cfg = agent_cfg["trainer"].copy()
+            trainer_cfg["close_environment_at_exit"] = False  # We'll close it manually
+
+            trainer = SequentialTrainer(
+                env=env,
+                agents=agent,
+                cfg=trainer_cfg
+            )
+
+            # Load checkpoint if specified
+            if resume_path:
+                print(f"[INFO] Loading model checkpoint from: {resume_path}")
+                agent.load(resume_path)
+
+            # Run training
+            trainer.train()
+
+            use_custom_f1tenth_models = True  # Mark as handled
+
+        except Exception as e:
+            print(f"[WARNING] Failed to setup F1TENTH CNN+MLP models: {e}")
+            print("          Falling back to default Runner with MLP models")
+            use_custom_f1tenth_models = False
+
+    # ========== Standard Runner (for non-F1TENTH tasks or fallback) ==========
+    if not use_custom_f1tenth_models:
+        # configure and instantiate the skrl runner
+        # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
+        runner = Runner(env, agent_cfg)
+
+        # load checkpoint (if specified)
+        if resume_path:
+            print(f"[INFO] Loading model checkpoint from: {resume_path}")
+            runner.agent.load(resume_path)
+
+        # run training
+        runner.run()
 
     # close the simulator
     env.close()
