@@ -90,11 +90,12 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
   <!-- ============================================ -->
 
   <!-- Left Rear Wheel -->
-  <joint name="left_rear_wheel_joint" type="continuous">
+  <joint name="left_rear_wheel_joint" type="revolute">
     <parent link="base_link"/>
     <child link="left_rear_wheel"/>
     <origin xyz="0 0.12065 0.0508" rpy="0 0 0"/>  <!-- y = (wheel_width + width)/2 -->
     <axis xyz="0 1 0"/>  <!-- Rotation around Y axis -->
+    <limit lower="-1e9" upper="1e9" effort="100.0" velocity="400.0"/>  <!-- VESC motor: 100 N·m -->
   </joint>
 
   <link name="left_rear_wheel">
@@ -127,11 +128,12 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
   </link>
 
   <!-- Right Rear Wheel -->
-  <joint name="right_rear_wheel_joint" type="continuous">
+  <joint name="right_rear_wheel_joint" type="revolute">
     <parent link="base_link"/>
     <child link="right_rear_wheel"/>
     <origin xyz="0 -0.12065 0.0508" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
+    <limit lower="-1e9" upper="1e9" effort="100.0" velocity="400.0"/>  <!-- VESC motor: 100 N·m -->
   </joint>
 
   <link name="right_rear_wheel">
@@ -188,11 +190,12 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
   </link>
 
   <!-- Left Front Wheel -->
-  <joint name="left_front_wheel_joint" type="continuous">
+  <joint name="left_front_wheel_joint" type="revolute">
     <parent link="left_steering_hinge"/>
     <child link="left_front_wheel"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
+    <limit lower="-1e9" upper="1e9" effort="100.0" velocity="400.0"/>  <!-- AWD: VESC motor -->
   </joint>
 
   <link name="left_front_wheel">
@@ -245,11 +248,12 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
   </link>
 
   <!-- Right Front Wheel -->
-  <joint name="right_front_wheel_joint" type="continuous">
+  <joint name="right_front_wheel_joint" type="revolute">
     <parent link="right_steering_hinge"/>
     <child link="right_front_wheel"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
+    <limit lower="-1e9" upper="1e9" effort="100.0" velocity="400.0"/>  <!-- AWD: VESC motor -->
   </joint>
 
   <link name="right_front_wheel">

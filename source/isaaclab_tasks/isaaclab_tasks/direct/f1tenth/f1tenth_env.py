@@ -69,7 +69,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     )
 
     # 환경 설정
-    episode_length_s = 10.0  # 더 빠른 주행을 장려하기 위해 20.0에서 감소
+    episode_length_s = 100.0  # 지속적인 학습을 위해 긴 에피소드 길이 
     decimation = 2
 
     # 행동 공간
@@ -104,7 +104,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
         "x_range": (0.0, 0.0),           # X축 스폰 범위 [최소, 최대]
         "y_range": (-0.70, -0.60),           # Y축 스폰 범위 [최소, 최대]
         "z_fixed": -0.5,                   # 고정 Z 높이 (충돌 방지)
-        "yaw_range": (-math.pi/4, 0), # Yaw 방향 범위 [최소, 최대]
+        "yaw_range": (-math.pi/8, 0), # Yaw 방향 범위 [최소, 최대]
     }
 
     # 트랙 중심선 waypoints (X, Y 좌표)
@@ -136,12 +136,18 @@ class F1TenthEnv(DirectRLEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
         # 이제 _setup_scene()에서 생성된 self.robot 및 self.lidar에 액세스할 수 있습니다.
-        self._steering_joint_ids, _ = self.robot.find_joints(".*steering_hinge_joint")
-        self._rear_wheel_ids, _ = self.robot.find_joints(".*rear_wheel_joint")
+        self._steering_joint_ids, self._steering_joint_names = self.robot.find_joints(".*steering_hinge_joint")
+        self._rear_wheel_ids, self._rear_wheel_names = self.robot.find_joints(".*rear_wheel_joint")
+        self._front_wheel_ids, self._front_wheel_names = self.robot.find_joints(".*front_wheel_joint")
+        print("JOINTS -> steering:", getattr(self, "_steering_joint_names", self._steering_joint_ids),
+              " rear:", getattr(self, "_rear_wheel_names", self._rear_wheel_ids),
+              " front:", getattr(self, "_front_wheel_names", self._front_wheel_ids))
+        print("ACTUATORS KEYS:", list(self.robot.actuators.keys()) if hasattr(self.robot, "actuators") else "no actuators")
 
         self.action_scale_steering = torch.tensor([cfg.action_scale_steering], device=self.device)
         # action_scale_velocity는 직접 속도 제어로 변경되어 더 이상 필요 없음
         self.previous_pos = torch.zeros(self.num_envs, 3, device=self.device)
+        self.previous_total_distance = torch.zeros(self.num_envs, device=self.device)
 
         # 보상 계산 변수
         self.lidar_distances = None  # 보상 계산을 위해 LiDAR 거리 저장
@@ -150,9 +156,10 @@ class F1TenthEnv(DirectRLEnv):
         # 차량이 회전할 때 후진 주행이 보상받는 것을 방지합니다.
         self.initial_heading = torch.zeros(self.num_envs, 2, device=self.device)  # (num_envs, 2) XY 방향 벡터
 
-        # _get_dones()와 _get_rewards() 간의 공유된 충돌 감지 결과
-        # _get_dones()가 먼저 이것을 계산한 다음 _get_rewards()가 사용합니다.
-        self.current_collision_detected = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # 이 단계에서 계산될 종료 플래그
+        self.collision_terminated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.stuck_terminated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.out_of_bounds_terminated = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # 모터 제어: 직접 속도 제어 (VESC 속도 제어 모드)
         self.wheel_radius = cfg.vehicle_params["wheel_radius"]
@@ -162,14 +169,29 @@ class F1TenthEnv(DirectRLEnv):
 
         # 막힘 감지: 움직임 확인을 위해 위치 추적
         # 차량이 적절한 시간 내에 움직이지 않았는지 확인
-        self.stuck_check_interval = 120  # 스텝 (60Hz에서 2초)
-        self.stuck_threshold = 0.01  # 미터 (최소 1cm 움직임)
+        self.stuck_check_interval = 120  # 스텝 (2초)
+        self.stuck_threshold = 0.1  # 미터 (2초에 최소 10cm 움직임 = 평균 0.05m/s)
+        self.stuck_initial_delay = 300  # 리셋 후 첫 체크까지 지연 시간 (5초)
         self.last_check_pos = torch.zeros(self.num_envs, 2, device=self.device)  # XY 위치
         self.steps_since_last_check = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
         # 슬립 감지: 주행 거리계 계산을 위해 바퀴 회전 추적
-        # 마지막 막힘 확인 시점의 바퀴 위치 저장 (매 스텝 아님)
+        # 마지막 막힘 확인 시점의 바퀴 위치 저장 (매 스텝 아님!)
         self.wheel_pos_at_last_check = torch.zeros(self.num_envs, len(self._rear_wheel_ids), device=self.device)
+
+        # 에피소드 통계
+        self.episode_reward_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_commanded_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_actual_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        # 보상 항목별 통계
+        self.episode_reward_forward_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_reward_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_reward_survival_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_termination_penalty_sum = torch.zeros(self.num_envs, device=self.device)
+
+
+        print(f"Steering joint limits: {self.robot.data.soft_joint_pos_limits[0, self._steering_joint_ids]}")
+
 
         # 트랙 중심선 초기화 (진행 거리 기반 보상)
         self._init_centerline()
@@ -193,49 +215,40 @@ class F1TenthEnv(DirectRLEnv):
         # 조명 추가
         light_cfg = sim_utils.DomeLightCfg(intensity=3000.0, color=(0.9, 0.9, 0.9))
         light_cfg.func("/World/Light", light_cfg)
-
+        
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        """행동을 처리하고 제어 명령을 준비합니다.
-
-        Args:
-            actions: 정규화된 공간 [-1, 1]의 [조향_속도, 목표_속도]
-                    - actions[:, 0]: 조향 속도 [-1, 1]
-                    - actions[:, 1]: 목표 선속도 [-1, 1] → [v_min, v_max]
         """
-        # 조향 속도 명령
-        steering_vel = actions[:, 0] * self.action_scale_steering
-        self.steering_vel = steering_vel.unsqueeze(-1)
-
-        # 속도 명령 (VESC 속도 제어 모드)
-        # VESC 6 MkV는 목표 RPM을 설정하면 내장 PID로 빠르게 추종
-        # Action space [-1, 1]을 속도 범위 [v_min, v_max]로 선형 매핑
+        Args:
+            actions: 정규화된 공간 [-1, 1]의 [조향_각도, 목표_속도]
+            - actions[:, 0]: 목표 조향 각도 [-1, 1] → [-0.4, 0.4] rad (약 ±23도)
+            - actions[:, 1]: 목표 선속도 [-1, 1] → [v_min, v_max]
+        """
+        # 조향: 위치 제어로 변경 (속도 제어 대신)
+        max_steering_angle = 0.4  # 라디안 (약 23도)
+        target_steering_angle = actions[:, 0] * max_steering_angle
+        self.target_steering = target_steering_angle.unsqueeze(-1)
+        
+        # 속도 명령
         v_min = self.cfg.vehicle_params["v_min"]
         v_max = self.cfg.vehicle_params["v_max"]
-
-        # action=-1 → v_min, action=0 → (v_min+v_max)/2, action=+1 → v_max
         self.target_velocity = (actions[:, 1] + 1.0) / 2.0 * (v_max - v_min) + v_min
 
     def _apply_action(self) -> None:
-        """로봇에 제어 명령을 적용합니다.
+        """로봇에 제어 명령을 적용합니다."""
+        # 조향: 위치 제어 (속도 제어보다 안정적)
+        self.robot.set_joint_position_target(self.target_steering, joint_ids=self._steering_joint_ids)
 
-        후륜에 속도 제어를 사용합니다 (VESC 기반).
-        """
-        # 조향: 속도 제어
-        self.robot.set_joint_velocity_target(self.steering_vel, joint_ids=self._steering_joint_ids)
-
-        # 후륜: 선형 속도를 각속도로 변환
-        # omega = v / r
+        # 후륜만 속도 제어 (RWD - Rear Wheel Drive)
         target_wheel_angular_vel = self.target_velocity / self.wheel_radius
         target_wheel_angular_vel = target_wheel_angular_vel.unsqueeze(-1)
-
-        # 최대 바퀴 속도로 제한
         target_wheel_angular_vel = torch.clamp(
             target_wheel_angular_vel,
             -self.max_wheel_speed,
             self.max_wheel_speed
         )
-
+        # 후륜에만 속도 명령 전송 (RWD, 실제 F1tenth와 동일)
         self.robot.set_joint_velocity_target(target_wheel_angular_vel, joint_ids=self._rear_wheel_ids)
+        # 전륜은 프리휠(free-rolling) - 속도 명령 없음
 
     def _get_observations(self) -> dict:
         lidar_data = self.lidar.data.ray_hits_w[..., :3]
@@ -253,20 +266,10 @@ class F1TenthEnv(DirectRLEnv):
             steering_angle = torch.zeros(joint_pos.shape[0], device=self.device)
 
         # 전진 방향 속도 계산 (트랙 중심선 기준, 양수=전진, 음수=후진)
-        # 현재 위치에서 가장 가까운 centerline waypoint 찾기
-        pos_xy = pos[:, :2]  # (num_envs, 2)
-        distances = torch.norm(
-            pos_xy.unsqueeze(1) - self.centerline.unsqueeze(0),
-            dim=-1
-        )  # (num_envs, num_waypoints)
-        closest_idx = torch.argmin(distances, dim=-1)  # (num_envs,)
-        next_idx = (closest_idx + 1) % len(self.centerline)
-
-        # 트랙 진행 방향 계산 (현재 waypoint → 다음 waypoint)
-        current_waypoint = self.centerline[closest_idx]  # (num_envs, 2)
-        next_waypoint = self.centerline[next_idx]  # (num_envs, 2)
-        forward_direction = next_waypoint - current_waypoint  # (num_envs, 2)
-        forward_direction = forward_direction / (torch.norm(forward_direction, dim=-1, keepdim=True) + 1e-6)
+        # 현재 segment 방향으로 속도 투영 (선분 투영 방식과 일관성 유지)
+        # Note: _get_track_progress()가 먼저 호출되어야 current_waypoint_idx가 업데이트됨
+        # 관찰에서는 이전 스텝의 segment 방향을 사용 (문제 없음)
+        forward_direction = self._get_centerline_direction()  # (num_envs, 2)
 
         vel_xy = vel[:, :2]  # XY 평면 속도
         forward_speed = torch.sum(vel_xy * forward_direction, dim=-1, keepdim=True)  # 전진 속도 투영
@@ -330,14 +333,14 @@ class F1TenthEnv(DirectRLEnv):
         waypoints_np = np.array(self.cfg.centerline_waypoints, dtype=np.float32)
 
         # Waypoints 사이를 선형 보간하여 촘촘한 점 생성
-        # 각 구간을 10개 점으로 나눔 (해상도 조정 가능)
+        # 각 구간을 100개 점으로 나눔 (1cm 간격으로 진행 감지)
         interpolated_points = []
         for i in range(len(waypoints_np) - 1):
             start = waypoints_np[i]
             end = waypoints_np[i + 1]
             # 시작점부터 끝점 전까지 (끝점은 다음 구간의 시작점)
-            for j in range(10):
-                t = j / 10.0
+            for j in range(100):
+                t = j / 100.0
                 point = start + t * (end - start)
                 interpolated_points.append(point)
 
@@ -371,6 +374,10 @@ class F1TenthEnv(DirectRLEnv):
         """
         차량 위치에서 트랙 진행 거리를 계산합니다.
 
+        개선된 방식: 폐곡선을 직선으로 펼쳐서 생각하고, 차량 위치를
+        가장 가까운 centerline 선분에 투영하여 연속적인 진행거리를 계산합니다.
+        이렇게 하면 도로 폭 내에서 차량이 어디 있든 정확한 진행을 감지합니다.
+
         Args:
             pos: 차량 위치 (num_envs, 3) - XYZ 좌표
 
@@ -381,18 +388,42 @@ class F1TenthEnv(DirectRLEnv):
         # XY 위치만 사용
         pos_xy = pos[:, :2]  # (num_envs, 2)
 
-        # 각 환경에 대해 가장 가까운 centerline waypoint 찾기
-        # Broadcasting: (num_envs, 1, 2) - (1, num_waypoints, 2)
-        distances = torch.norm(
-            pos_xy.unsqueeze(1) - self.centerline.unsqueeze(0),
-            dim=-1
-        )  # (num_envs, num_waypoints)
+        # 선분 투영 방식: 차량 위치를 centerline segments에 투영
+        num_segments = len(self.centerline) - 1
 
-        # 가장 가까운 waypoint index
-        closest_idx = torch.argmin(distances, dim=-1)  # (num_envs,)
+        # Segment 벡터 계산 (한 번만)
+        segment_starts = self.centerline[:-1]  # (num_segments, 2)
+        segment_ends = self.centerline[1:]     # (num_segments, 2)
+        segment_vectors = segment_ends - segment_starts  # (num_segments, 2)
+        segment_len_sq = (segment_vectors ** 2).sum(dim=-1)  # (num_segments,) - 길이의 제곱
 
-        # 해당 waypoint까지의 누적 거리 = 진행 거리
-        progress = self.centerline_cumulative_dist[closest_idx]  # (num_envs,)
+        # 각 차량에서 모든 segment 시작점까지의 벡터
+        # Broadcasting: (num_envs, num_segments, 2)
+        to_vehicle = pos_xy.unsqueeze(1) - segment_starts.unsqueeze(0)  # (num_envs, num_segments, 2)
+
+        # 투영 비율 t 계산
+        # t = (to_vehicle · segment_vector) / ||segment_vector||^2
+        dot_product = (to_vehicle * segment_vectors.unsqueeze(0)).sum(dim=-1)  # (num_envs, num_segments)
+        t = dot_product / (segment_len_sq.unsqueeze(0) + 1e-8)  # (num_envs, num_segments)
+        t = torch.clamp(t, 0.0, 1.0)  # Segment 내로 제한
+
+        # 투영점 계산
+        projected_points = segment_starts.unsqueeze(0) + t.unsqueeze(-1) * segment_vectors.unsqueeze(0)  # (num_envs, num_segments, 2)
+
+        # 차량에서 투영점까지 거리
+        dist_to_proj = torch.norm(pos_xy.unsqueeze(1) - projected_points, dim=-1)  # (num_envs, num_segments)
+
+        # 가장 가까운 segment 선택
+        closest_seg = torch.argmin(dist_to_proj, dim=-1)  # (num_envs,)
+
+        # 가장 가까운 segment의 t 값
+        batch_indices = torch.arange(pos_xy.shape[0], device=pos_xy.device)
+        t_closest = t[batch_indices, closest_seg]  # (num_envs,)
+
+        # 진행거리 계산: segment 시작점 누적거리 + (t × segment 길이)
+        seg_start_dist = self.centerline_cumulative_dist[closest_seg]  # (num_envs,)
+        seg_length = torch.sqrt(segment_len_sq[closest_seg])  # (num_envs,)
+        progress = seg_start_dist + t_closest * seg_length  # (num_envs,)
 
         # 결승선 통과 감지 (90% 지점에서 10% 지점으로 점프)
         finish_line_crossed = (self.previous_progress > self.track_length * 0.9) & \
@@ -405,14 +436,14 @@ class F1TenthEnv(DirectRLEnv):
         # = 현재 lap의 진행 거리 + (완주한 lap 수 * track_length)
         absolute_progress = progress + self.lap_count.float() * self.track_length
 
-        # 진행량 계산 (절대 거리 기반이므로 항상 양수)
+        # 진행량 계산 (절대 거리 기반이므로 항상 양수여야 함)
         progress_delta = absolute_progress - self.total_distance
 
         # 절대 진행 거리 업데이트
         self.total_distance[:] = absolute_progress
 
-        # 현재 waypoint index 업데이트
-        self.current_waypoint_idx[:] = closest_idx
+        # 현재 segment index 업데이트 (디버그 출력용)
+        self.current_waypoint_idx[:] = closest_seg
 
         # 다음 스텝을 위해 현재 진행 거리 저장 (결승선 감지용)
         self.previous_progress[:] = progress
@@ -426,303 +457,156 @@ class F1TenthEnv(DirectRLEnv):
         Returns:
             direction: (num_envs, 2) - 정규화된 XY 방향 벡터 (트랙 진행 방향)
         """
-        # 각 환경의 현재 waypoint와 다음 waypoint 인덱스
-        current_idx = self.current_waypoint_idx  # (num_envs,)
-        next_idx = (current_idx + 1) % len(self.centerline)  # (num_envs,)
+        # 각 환경의 현재 segment 인덱스
+        # Segment i는 centerline[i]에서 centerline[i+1]로 가는 선분
+        segment_idx = self.current_waypoint_idx  # (num_envs,)
 
-        # 각 환경의 waypoint 좌표 가져오기
-        current_waypoint = self.centerline[current_idx]  # (num_envs, 2)
-        next_waypoint = self.centerline[next_idx]  # (num_envs, 2)
+        # 각 segment의 시작점과 끝점
+        segment_start = self.centerline[segment_idx]  # (num_envs, 2)
+        segment_end = self.centerline[segment_idx + 1]  # (num_envs, 2)
 
-        # 방향 벡터 계산 및 정규화
-        direction = next_waypoint - current_waypoint  # (num_envs, 2)
+        # 방향 벡터 계산 및 정규화 (현재 segment의 방향)
+        direction = segment_end - segment_start  # (num_envs, 2)
         direction = direction / (torch.norm(direction, dim=-1, keepdim=True) + 1e-6)
 
         return direction
 
     def _get_rewards(self) -> torch.Tensor:
         """
-        트랙 진행 거리 기반 보상 함수:
-        - 50% 트랙 진행: 중심선을 따라 진행한 거리
-        - 0.01% 생존 보상: 오래 살아남을수록 유리
-        - 10% 속도 보상: 전방 속도
-        - 30% 충돌 페널티: LiDAR 기반 충돌 감지
+        트랙 진행 거리 기반 보상 함수 (학습 초기 탐험 장려):
+        - 트랙 진행: 중심선을 따라 1m당 30점
+        - 저속 페널티: 1 m/s 미만일 때 선형 페널티 (0 m/s = -0.01, 1 m/s = 0)
+        - 속도 보상: 전방 속도에 비례 (최대 5 m/s)
+        - 종료 벌점: 충돌 또는 STUCK 시 -100점 (grace period 5 step)
         """
         pos = self.robot.data.root_state_w[:, :3]
         vel = self.robot.data.root_state_w[:, 7:10]
 
-        # 1) 트랙 진행 거리 보상 (50%)
-        # 중심선을 따라 진행한 거리를 보상
-        _, progress_delta = self._get_track_progress(pos)
+        # -- 종료 조건 계산 (페널티 계산을 위해 먼저 수행) --
+        self.out_of_bounds_terminated = torch.norm(pos[:, :2], dim=-1) > 50.0
 
-        # 전진한 거리에만 보상 (후진은 0)
-        # 0~1m 진행 -> 0~0.5 보상
-        reward_forward = torch.clamp(progress_delta, 0.0, 1.0) * 0.5
+        # Grace Period 정의
+        grace_period = 5  # 3에서 5로 증가하여 더 안전하게
+        in_grace_period = self.episode_length_buf < grace_period
 
-        # 2) 생존 보상 (0.01%)
-        # 스텝당 0.0001 보상 (초기 10 step 제외, 전진 중일 때만, 오래 살아남을수록 유리)
-        # 생존 보상은 나중에 forward_speed_raw 계산 후 적용
-
-        # 3) 양의 속도 보상 (10%)
-        # 전방 속도 구성 요소에 보상 (트랙 중심선 기준, 양의 속도만)
-        forward_direction = self._get_centerline_direction()  # (num_envs, 2) - 트랙 진행 방향
-        vel_xy = vel[:, :2]  # XY 평면 속도
-        forward_speed_raw = torch.sum(vel_xy * forward_direction, dim=-1)  # 속도를 트랙 방향에 투영
-
-        # 양의 속도(전진)에만 보상
-        # 0~10m/s -> 0~0.1 보상
-        reward_speed = torch.clamp(forward_speed_raw / 10.0, 0.0, 1.0) * 0.1
-
-        # 생존 보상 계산 (전진 중일 때만)
-        is_moving_forward = forward_speed_raw > 0.0  # 트랙 방향으로 움직이는지
-        reward_survival = torch.where(
-            (self.episode_length_buf >= 10) & is_moving_forward,  # Step 10 이후 & 전진 중
-            torch.full((self.num_envs,), 0.001, device=self.device),
-            torch.zeros(self.num_envs, device=self.device)
-        )
-
-        # 4) 충돌 벌점 (-30%)
-        # _get_dones()에서 이미 계산된 충돌 감지 사용 (타이밍 문제 해결)
-        # Grace period 적용: 리셋 후 3 스텝 동안 충돌 페널티 비활성화
-        collision_penalty = torch.zeros(self.num_envs, device=self.device)
-
-        if self.lidar_distances is not None:
-            # _get_dones()의 충돌 감지 재사용
-            collision_detected = self.current_collision_detected.clone()
-
-            # Grace period: 리셋 후 3 스텝 동안 충돌 페널티 비활성화
-            grace_period = 3
-            in_grace_period = self.episode_length_buf < grace_period
-            collision_detected = collision_detected & ~in_grace_period
-
-            # 충돌 감지 시 즉시 -0.3 페널티 적용
-            collision_penalty[collision_detected] = -0.3
-
-            # 디버그: 보상 계산에서 충돌이 감지되면 출력
-            if self.cfg.debug_mode and collision_detected.any():
-                detected_envs = torch.where(collision_detected)[0]
-                for idx in detected_envs:
-                    min_dist = torch.min(self.lidar_distances[idx]).item()
-                    close_count = (self.lidar_distances[idx] < 0.1).sum().item()
-                    print(f"[REWARD COLLISION] Env {idx.item()} at step {self.episode_length_buf[idx].item()}: Min={min_dist:.3f}m, Close(<10cm)={close_count}, Penalty={collision_penalty[idx].item():.4f}")
-
-        # 총 보상
-        reward = reward_forward + reward_survival + reward_speed + collision_penalty
-        
-
-        # 다음 스텝을 위해 상태 업데이트
-        self.previous_pos[:] = pos
-
-        return reward
-
-    def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        pos, vel = self.robot.data.root_state_w[:, :3], self.robot.data.root_state_w[:, 7:10]
-        time_out = self.episode_length_buf >= self.max_episode_length - 1
-
-        # 종료 조건
-        out_of_bounds = torch.norm(pos[:, :2], dim=-1) > 50.0
-
-        # 충돌 감지 (이중 방법):
-        # 1. LiDAR 기반: 전방/측면 충돌 (270° 커버리지)
-        # 충돌을 계산하고 _get_rewards()에서 사용하도록 저장 (타이밍 문제 해결)
-        self.current_collision_detected = self._detect_collision_consecutive(
+  
+        collision_detected = self._detect_collision_consecutive(
             self.lidar_distances,
-            threshold=0.1,  # 10cm 충돌 임계값 (0.2m에서 변경)
+            threshold=0.1,  # 10cm 충돌 임계값
             consecutive_count=10  # 더 강력한 감지를 위해 5에서 10으로 증가 (2.5° 범위)
         )
+        # Grace Period 내 환경은 충돌로 판별하지 않음
+        
+        self.collision_terminated = collision_detected & ~in_grace_period
 
-        # 유예 기간: 리셋 후 처음 3 스텝 동안 충돌 감지 비활성화
-        # 센서 업데이트 전 오래된 LiDAR 데이터로 인한 오탐 방지
-        grace_period = 3
-        in_grace_period = self.episode_length_buf < grace_period
-        collision_lidar = self.current_collision_detected & ~in_grace_period
-
-        # 결합됨: 이제 LiDAR 기반 감지만 사용
-        collision = collision_lidar
-
-        # 막힘 감지: 차량이 XY 평면에서 충분히 움직이지 않았는지 확인
+        # 막힘 감지
         self.steps_since_last_check += 1
-        stuck = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-        # stuck_check_interval 스텝마다 확인
+        self.stuck_terminated.zero_()
         check_now = self.steps_since_last_check >= self.stuck_check_interval
+
         if check_now.any():
             current_pos_xy = pos[:, :2]
             movement = torch.norm(current_pos_xy - self.last_check_pos, dim=-1)
-
-            # 움직임이 임계값보다 작으면 막힌 것으로 표시
-            stuck[check_now] = movement[check_now] < self.stuck_threshold
-
-            # 디버그 로깅: 막힌 환경에 대한 슬립 감지 출력
-            if stuck.any():
-                wheel_radius = 0.0508  # F1tenth 바퀴 반지름 (미터)
-                current_wheel_pos = self.robot.data.joint_pos[:, self._rear_wheel_ids]
-
-                # 확인 간격 동안의 바퀴 회전 변화 계산 (1 스텝만이 아님!)
-                wheel_delta = current_wheel_pos - self.wheel_pos_at_last_check
-
-                # 회전 변화로부터 바퀴 주행 거리계 계산
-                wheel_odometry = torch.mean(torch.abs(wheel_delta), dim=-1) * wheel_radius
-
-                # 검증: GT 위치를 사용하여 실제 거리 계산
-                # 이는 바퀴 주행 거리계와 위치 추적을 모두 검증합니다.
-                stuck_env_idx = torch.where(stuck)[0]
-                for idx in stuck_env_idx:
-                    # 현재 위치
-                    current_xy = pos[idx, :2]
-                    last_check_xy = self.last_check_pos[idx]
-
-                    # GT 기반 거리 (실측값)
-                    gt_distance = torch.norm(current_xy - last_check_xy).item()
-
-                    # 바퀴 기반 거리 (주행 거리계)
-                    wheel_dist = wheel_odometry[idx].item()
-
-                    # 움직임과 비교 (gt_distance와 동일해야 함)
-                    movement_dist = movement[idx].item()
-
-                    # 슬립 비율: (바퀴_거리 - 실제_거리) / 바퀴_거리
-                    slip_ratio = (wheel_dist - gt_distance) / (wheel_dist + 1e-6)
-
-                    if self.cfg.debug_mode:
-                        print(f"\n[STUCK DETECTION] Env {idx.item()} at step {self.episode_length_buf[idx].item()}:")
-                        print(f"  Current Position: X={current_xy[0].item():.3f}, Y={current_xy[1].item():.3f}, Z={pos[idx, 2].item():.3f}")
-                        print(f"  Last Check Position: X={last_check_xy[0].item():.3f}, Y={last_check_xy[1].item():.3f}")
-                        print(f"  GT Distance (current - last): {gt_distance:.3f}m")
-                        print(f"  Movement variable: {movement_dist:.3f}m (should match GT)")
-                        print(f"  Wheel odometry ({self.stuck_check_interval} steps): {wheel_dist:.3f}m")
-                        print(f"  Slip ratio: {slip_ratio:.2%}")
-
-                        # 유효성 검사
-                        if abs(gt_distance - movement_dist) > 0.001:
-                            print(f"  ⚠️  WARNING: GT distance and movement mismatch! Diff: {abs(gt_distance - movement_dist):.6f}m")
-
-            # 확인된 환경에 대해서만 마지막 확인 위치 및 바퀴 위치 업데이트
+            self.stuck_terminated[check_now] = movement[check_now] < self.stuck_threshold
             self.last_check_pos[check_now] = current_pos_xy[check_now]
             self.steps_since_last_check[check_now] = 0
 
-            # 확인 시점의 바퀴 위치 업데이트 (매 스텝 아님!)
-            current_wheel_pos_all = self.robot.data.joint_pos[:, self._rear_wheel_ids]
-            self.wheel_pos_at_last_check[check_now] = current_wheel_pos_all[check_now]
+        # -- 보상 계산 --
+        # 1) 트랙 진행 거리 보상
+        _, progress_delta = self._get_track_progress(pos)
+        reward_forward = torch.clamp(progress_delta, min=0.0) * 30
 
-        terminated = out_of_bounds | collision | stuck
+        # 2) 속도 보상
+        forward_direction = self._get_centerline_direction()
+        vel_xy = vel[:, :2]
+        forward_speed_raw = torch.sum(vel_xy * forward_direction, dim=-1)
+        reward_speed = torch.clamp(forward_speed_raw / 5.0, 0.0, 1.0) * 1.0
 
-        # 디버그 로깅: 환경이 종료될 때 종료 이유 출력
-        if self.cfg.debug_mode and terminated.any():
-            env_idx = torch.where(terminated)[0]
-            for idx in env_idx:
-                min_lidar = torch.min(self.lidar_distances[idx]).item() if self.lidar_distances is not None else 0.0
-                # 디버그 정보를 위해 연속적인 가까운 포인트 수 계산
-                close_count = (self.lidar_distances[idx] < 0.2).sum().item() if self.lidar_distances is not None else 0
+        # 3) 저속 페널티 (실제 속도 기반)
+        # 1m/s 미만으로 느리게 움직이는 행동을 억제합니다.
+        # 선형 페널티: 0 m/s → -0.01, 1 m/s → 0
+        speed_threshold = 1.0
+        slow_speed_mask = forward_speed_raw < speed_threshold
+        reward_survival = torch.zeros(self.num_envs, device=self.device)
+        reward_survival[slow_speed_mask] = -0.01 * (1.0 - forward_speed_raw[slow_speed_mask] / speed_threshold)
 
-                # 속도 디버그 정보
-                # Commanded: 목표 속도 (방향 포함, 음수=후진, 양수=전진)
-                commanded_speed = self.target_velocity[idx].item()
+        # 4) 충돌/STUCK 벌점 (현재 스텝 기준)
+        termination_penalty = torch.zeros(self.num_envs, device=self.device)
 
-                # Actual: 전진 방향 속도 (트랙 중심선 기준, 옆 미끄러짐 제외)
-                # 현재 waypoint에서 다음 waypoint로의 방향
-                current_waypoint_idx = int(self.current_waypoint_idx[idx].item())
-                next_waypoint_idx = (current_waypoint_idx + 1) % len(self.centerline)
-                forward_direction = self.centerline[next_waypoint_idx] - self.centerline[current_waypoint_idx]
-                forward_direction = forward_direction / (torch.norm(forward_direction) + 1e-6)
+        # Grace Period가 아닐 때만 페널티 적용
+        apply_penalty = (self.collision_terminated | self.stuck_terminated) & ~in_grace_period
+        termination_penalty[apply_penalty] = -100
 
-                vel_xy = vel[idx, :2]
-                speed_current = torch.sum(vel_xy * forward_direction).item()
+        # 총 보상
+        reward = reward_forward + reward_survival + reward_speed + termination_penalty
 
-                speed_deficit = commanded_speed - speed_current
+        # 에피소드 통계 누적
+        self.episode_reward_sum += reward
+        self.episode_commanded_speed_sum += self.target_velocity
+        self.episode_actual_speed_sum += forward_speed_raw
+        self.episode_reward_forward_sum += reward_forward
+        self.episode_reward_speed_sum += reward_speed
+        self.episode_reward_survival_sum += reward_survival
+        self.episode_termination_penalty_sum += termination_penalty
 
-                # 디버깅을 위해 차량 방향 계산
-                quat = self.robot.data.root_state_w[idx, 3:7]
-                w, x, y, z = quat[0].item(), quat[1].item(), quat[2].item(), quat[3].item()
-                forward_x = 1 - 2 * (y**2 + z**2)
-                forward_y = 2 * (x*y + w*z)
-                # 방향에서 yaw 각도 계산
-                yaw = math.atan2(forward_y, forward_x) * 180 / math.pi
+        # 바퀴 속도 로깅 제거됨
 
-                # 종료 이유 결정 (우선 순위 순)
-                reason = []
-                if collision_lidar[idx].item():
-                    reason.append("COLLISION (LiDAR)")
-                if stuck[idx].item():
-                    reason.append("STUCK")
-                if out_of_bounds[idx].item():
-                    reason.append("OUT OF BOUNDS")
+        # 다음 스텝을 위해 상태 업데이트
+        self.previous_pos[:] = pos
+        self.previous_total_distance[:] = self.total_distance
+
+        return reward
+
+
+    def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
+        # _get_rewards()에서 계산된 종료 플래그를 가져옴
+        # 참고: 그레이스 기간(grace period)은 _get_rewards의 페널티 계산에만 영향을 미치며,
+        # 에피소드 종료 자체는 즉시 발생해야 합니다.
+        terminated = self.collision_terminated | self.stuck_terminated | self.out_of_bounds_terminated
+        time_out = self.episode_length_buf >= self.max_episode_length - 1
+
+        dones = terminated | time_out
+
+        # 에피소드 종료 시 요약 로그 출력
+        if self.cfg.debug_mode and dones.any():
+            done_ids = torch.where(dones)[0]
+            for idx in done_ids:
+                ep_len = self.episode_length_buf[idx].item()
+                if ep_len == 0:
+                    continue
+
+                # 종료 원인 결정 (로깅용)
+                reason = "UNKNOWN"
                 if time_out[idx].item():
-                    reason.append("TIMEOUT")
+                    reason = "TIMEOUT"
+                elif self.out_of_bounds_terminated[idx].item():
+                    reason = "OUT OF BOUNDS"
+                elif self.stuck_terminated[idx].item():
+                    reason = "STUCK"
+                elif self.collision_terminated[idx].item():
+                    reason = "COLLISION"
 
-                reason_str = " + ".join(reason) if reason else "UNKNOWN"
+                # 통계 계산
+                total_dist = self.total_distance[idx].item()
+                lap_num = self.lap_count[idx].item()
 
-                # 유예 기간인지 확인
-                grace_status = f" (Grace period)" if self.episode_length_buf[idx].item() < 3 else ""
+                # 평균 속도 계산
+                avg_cmd_speed = self.episode_commanded_speed_sum[idx].item() / ep_len
+                avg_actual_speed = self.episode_actual_speed_sum[idx].item() / ep_len
 
-                print(f"\n[TERMINATION] Env {idx.item()} at step {self.episode_length_buf[idx].item()}{grace_status} | REASON: {reason_str}")
-                print(f"  Position: X={pos[idx, 0].item():.3f}, Y={pos[idx, 1].item():.3f}, Z={pos[idx, 2].item():.3f}")
-                print(f"  Velocity: vx={vel[idx, 0].item():.3f}, vy={vel[idx, 1].item():.3f}, vz={vel[idx, 2].item():.3f}")
-                print(f"  Heading: forward_x={forward_x:.3f}, forward_y={forward_y:.3f}, yaw={yaw:.1f}°")
-                print(f"  LiDAR: Min={min_lidar:.3f}m, Close(<20cm)={close_count}")
+                # 보상 정보
+                total_reward = self.episode_reward_sum[idx].item()
+                avg_reward = total_reward / ep_len
+                total_forward_reward = self.episode_reward_forward_sum[idx].item()
+                total_speed_reward = self.episode_reward_speed_sum[idx].item()
+                total_survival_reward = self.episode_reward_survival_sum[idx].item()
+                total_penalty = self.episode_termination_penalty_sum[idx].item()
 
-                # 바퀴 회전 속도 기반 속도 계산 (휠 주행 거리계, Wheel Odometry)
-                # Wheel Odom: 바퀴 각속도 평균 (방향 고려, 음수=후진, 양수=전진)
-                wheel_vel = self.robot.data.joint_vel[idx, self._rear_wheel_ids]  # 뒷바퀴 각속도 [rad/s]
-                odom_speed = torch.mean(wheel_vel).item() * self.wheel_radius  # 선속도 [m/s], abs() 제거
-
-                print(f"  Speed: Commanded={commanded_speed:+.2f} m/s, Actual={speed_current:+.2f} m/s, Wheel Odom={odom_speed:+.2f} m/s, Deficit={speed_deficit:+.2f} m/s")
-
-                # 디버그: LiDAR 센서 위치 및 가장 가까운 충돌 지점 표시
-                if self.lidar_distances is not None:
-                    lidar_pos = self.lidar.data.pos_w[idx]  # 월드 프레임에서 LiDAR 센서 위치
-                    lidar_hits = self.lidar.data.ray_hits_w[idx]  # 월드 프레임에서 모든 충돌 지점
-                    min_idx = torch.argmin(self.lidar_distances[idx])
-                    closest_hit = lidar_hits[min_idx]
-                    min_distance_stored = self.lidar_distances[idx][min_idx].item()
-
-                    # 거리 계산 확인
-                    distance_recalculated = torch.norm(closest_hit - lidar_pos).item()
-
-                    print(f"  [LiDAR DEBUG] Sensor position: X={lidar_pos[0].item():.3f}, Y={lidar_pos[1].item():.3f}, Z={lidar_pos[2].item():.3f}")
-                    print(f"  [LiDAR DEBUG] Closest hit point: X={closest_hit[0].item():.3f}, Y={closest_hit[1].item():.3f}, Z={closest_hit[2].item():.3f}")
-                    print(f"  [LiDAR DEBUG] Distance (stored): {min_distance_stored:.3f}m | Distance (recalculated): {distance_recalculated:.3f}m")
-
-                    # 거리가 일치하는지 확인
-                    if abs(min_distance_stored - distance_recalculated) > 0.01:
-                        print(f"  [LiDAR WARNING] Distance mismatch! Diff: {abs(min_distance_stored - distance_recalculated):.3f}m")
-
-                    # 벽까지의 거리 표시
-                    wall_y = -0.197  # 관찰에서 알려진 벽 Y 좌표
-                    distance_to_wall = abs(lidar_pos[1].item() - wall_y)
-                    print(f"  [LiDAR DEBUG] Direct distance to wall (Y={wall_y}): {distance_to_wall:.3f}m")
-
-                # 터미네이션 시 보상 정보 출력
-                # _get_dones()가 _get_rewards()보다 먼저 실행되므로 현재 스텝 값으로 근사 계산
-
-                # 1) 이동거리 보상 (50%)
-                if hasattr(self, 'previous_pos'):
-                    displacement = pos[idx, :2] - self.previous_pos[idx, :2]
-                    forward_progress = torch.sum(displacement * forward_direction).item()
-                    reward_forward_approx = max(0.0, min(forward_progress, 1.0)) * 0.5
-                else:
-                    reward_forward_approx = 0.0
-
-                # 2) 생존 보상 (0.01%)
-                # Step 10 이후 & 전진 중일 때만 부여
-                current_step = self.episode_length_buf[idx].item()
-                is_moving_forward = speed_current > 0.0
-                reward_survival_approx = 0.001 if (current_step >= 10 and is_moving_forward) else 0.0
-
-                # 3) 속도 보상 (10%)
-                forward_speed = speed_current  # 이미 계산됨 (centerline 기준)
-                reward_speed_approx = max(0.0, min(forward_speed / 10.0, 1.0)) * 0.1
-
-                # 4) 충돌 벌점 (-30%)
-                # Grace period 적용
-                in_grace = self.episode_length_buf[idx].item() < 3
-                collision_penalty_approx = 0.0 if in_grace else (-0.3 if self.current_collision_detected[idx].item() else 0.0)
-
-                # 총 보상 계산
-                total_reward_approx = reward_forward_approx + reward_survival_approx + reward_speed_approx + collision_penalty_approx
-
-                print(f"  [REWARD] forward={reward_forward_approx:.4f}, survival={reward_survival_approx:.4f}, speed={reward_speed_approx:.4f}, collision={collision_penalty_approx:.4f}")
-                print(f"  [REWARD] Total (approx): {total_reward_approx:.4f}")
+                # 요약 로그 출력
+                print(f"\n[EPISODE END] Env {idx.item()} | {reason} | Steps: {ep_len}")
+                print(f"  > Progress: {total_dist:.2f}m, Laps: {lap_num}")
+                print(f"  > Speeds (avg m/s): Cmd={avg_cmd_speed:.2f}, Actual={avg_actual_speed:.2f}")
+                print(f"  > Rewards: Total={total_reward:.2f}, Avg={avg_reward:.3f} | (Fwd: {total_forward_reward:.2f}, Speed: {total_speed_reward:.2f}, SlowPen: {total_survival_reward:.2f}, TermPen: {total_penalty:.2f})")
 
         return terminated, time_out
 
@@ -779,11 +663,32 @@ class F1TenthEnv(DirectRLEnv):
 
         # 막힘 감지 재설정
         self.last_check_pos[env_ids] = default_root_state[:, :2]  # XY 위치
-        self.steps_since_last_check[env_ids] = 0
+        # 리셋 후 첫 체크를 지연시키기 위해 음수로 초기화
+        # 예: stuck_initial_delay=180, stuck_check_interval=60 → -120에서 시작
+        # 180스텝 후 60에 도달하여 첫 체크 발생
+        self.steps_since_last_check[env_ids] = self.stuck_check_interval - self.stuck_initial_delay
 
-        # 슬립 감지를 위해 바퀴 위치 추적기 재설정
+        # 슬립 감지를 위해 바퀴 위치 추적기 재설정 (4WD: 후륜만 추적)
+        # 전륜은 조향 때문에 슬립 계산이 복잡하므로 후륜만 사용
         self.wheel_pos_at_last_check[env_ids] = self.robot.data.joint_pos[env_ids][:, self._rear_wheel_ids]
 
+        # 에피소드 통계 재설정
+        self.episode_reward_sum[env_ids] = 0.0
+        self.episode_commanded_speed_sum[env_ids] = 0.0
+        self.episode_actual_speed_sum[env_ids] = 0.0
+        self.episode_reward_forward_sum[env_ids] = 0.0
+        self.episode_reward_speed_sum[env_ids] = 0.0
+        self.episode_reward_survival_sum[env_ids] = 0.0
+        self.episode_termination_penalty_sum[env_ids] = 0.0
+
+        # LiDAR 센서 데이터 초기화
+        if self.lidar_distances is not None:
+            self.lidar_distances[env_ids] = self.cfg.lidar.max_distance
+
+        self.collision_terminated[env_ids] = False
+        self.stuck_terminated[env_ids] = False
+        self.out_of_bounds_terminated[env_ids] = False
+        
         # 스폰 시 초기 방향 저장 (IMU와 유사한 참조 프레임)
         # 스폰 쿼터니언에서 방향 추출
         quat = default_root_state[:, 3:7]  # [w, x, y, z]
@@ -798,18 +703,43 @@ class F1TenthEnv(DirectRLEnv):
         initial_heading = initial_heading / (torch.norm(initial_heading, dim=-1, keepdim=True) + 1e-6)
         self.initial_heading[env_ids] = initial_heading
 
-        # 트랙 진행 거리 초기화
-        # 스폰 위치에서 가장 가까운 waypoint의 진행 거리로 초기화
-        spawn_pos_xy = spawn_pos[:, :2]
-        distances = torch.norm(
-            spawn_pos_xy.unsqueeze(1) - self.centerline.unsqueeze(0),
-            dim=-1
-        )
-        closest_idx = torch.argmin(distances, dim=-1)
-        self.previous_progress[env_ids] = self.centerline_cumulative_dist[closest_idx]
+        # 트랙 진행 거리 초기화 (선분 투영 방식)
+        spawn_pos_xy = spawn_pos[:, :2]  # (num_resets, 2)
 
-        # 절대 진행 거리 및 Lap counter 초기화
-        self.total_distance[env_ids] = self.centerline_cumulative_dist[closest_idx]
+        # Segment 계산
+        num_segments = len(self.centerline) - 1
+        segment_starts = self.centerline[:-1]
+        segment_ends = self.centerline[1:]
+        segment_vectors = segment_ends - segment_starts
+        segment_len_sq = (segment_vectors ** 2).sum(dim=-1)
+
+        # 스폰 위치에서 segment로의 벡터
+        to_spawn = spawn_pos_xy.unsqueeze(1) - segment_starts.unsqueeze(0)
+
+        # 투영 비율 t
+        dot_product = (to_spawn * segment_vectors.unsqueeze(0)).sum(dim=-1)
+        t = dot_product / (segment_len_sq.unsqueeze(0) + 1e-8)
+        t = torch.clamp(t, 0.0, 1.0)
+
+        # 투영점과 거리
+        projected = segment_starts.unsqueeze(0) + t.unsqueeze(-1) * segment_vectors.unsqueeze(0)
+        dist_to_proj = torch.norm(spawn_pos_xy.unsqueeze(1) - projected, dim=-1)
+
+        # 가장 가까운 segment
+        closest_seg = torch.argmin(dist_to_proj, dim=-1)
+        batch_idx = torch.arange(len(spawn_pos_xy), device=spawn_pos_xy.device)
+        t_closest = t[batch_idx, closest_seg]
+
+        # 초기 진행거리
+        seg_start_dist = self.centerline_cumulative_dist[closest_seg]
+        seg_len = torch.sqrt(segment_len_sq[closest_seg])
+        initial_progress = seg_start_dist + t_closest * seg_len
+
+        # 초기화
+        self.previous_progress[env_ids] = initial_progress
+        self.total_distance[env_ids] = initial_progress
+        self.previous_total_distance[env_ids] = initial_progress
         self.lap_count[env_ids] = 0
-        self.current_waypoint_idx[env_ids] = closest_idx
+        self.current_waypoint_idx[env_ids] = closest_seg
+
 

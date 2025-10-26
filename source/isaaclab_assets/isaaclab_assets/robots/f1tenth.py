@@ -60,12 +60,13 @@ F1TENTH_CFG = ArticulationCfg(
     ),
     actuators={
         # VESC Motor (rear wheels) - Velocity Control
+        # VESC 6 MkV: High-torque brushless motor with instant RPM response
         "rear_wheels": ImplicitActuatorCfg(
             joint_names_expr=[".*rear_wheel_joint"],  # Both rear wheels
-            effort_limit_sim=10.0,  # Motor torque limit
+            effort_limit_sim=8.5,  # High torque for instant acceleration (VESC capability)
             velocity_limit=196.0,  # Max wheel angular velocity (10 m/s / 0.0508 m)
-            stiffness=0.0,  # Velocity control mode
-            damping=0.01,  # Reduced from 0.5 for better velocity tracking
+            stiffness=50.0,  # Velocity control mode
+            damping=10.0,  # Very low damping for near-instant response (VESC PID tuning)
         ),
         # Servo Steering (Ackermann) - Position Control
         "steering": ImplicitActuatorCfg(
@@ -74,13 +75,8 @@ F1TENTH_CFG = ArticulationCfg(
             stiffness=800.0,  # High stiffness for position control
             damping=100.0,
         ),
-        # Front wheels (passive rotation)
-        "front_wheels": ImplicitActuatorCfg(
-            joint_names_expr=[".*front_wheel_joint"],
-            effort_limit_sim=0.0,  # No actuation
-            stiffness=0.0,
-            damping=0.1,  # Small damping for realistic rolling
-        ),
+        # Front wheels: Free-rolling (no actuator, RWD configuration)
+        # Front wheels rotate freely without motor control
     },
 )
 """Configuration for F1TENTH race car (Traxxas Fiesta ST Rally 1/10 Scale)."""

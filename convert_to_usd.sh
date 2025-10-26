@@ -22,13 +22,14 @@ echo ""
 
 # Convert URDF to USD
 # --merge-joints: REMOVED to preserve sensor mount points (laser link)
-# --joint-target-type velocity: Motor control mode
-# --joint-damping: Reduced from 0.5 to 0.01 for better velocity tracking
+# --joint-target-type velocity: Motor control mode for rear wheels
+# --joint-damping: 0.001 for near-instant VESC response (reduced from 0.01)
+# --joint-stiffness: 0.0 for velocity control mode
 ./isaaclab.sh -p scripts/tools/convert_urdf.py \
     "$URDF_PATH" \
     "$USD_OUTPUT" \
     --joint-stiffness 0.0 \
-    --joint-damping 0.01 \
+    --joint-damping 0.001 \
     --joint-target-type velocity \
     --headless
 

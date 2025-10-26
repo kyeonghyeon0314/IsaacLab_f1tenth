@@ -151,3 +151,33 @@ chmod +x convert_to_usd.sh
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 64
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+clear
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+rm -rf logs/
+cd logs/
+ls
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 3
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+cd ..
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+find . -type d -name "__pycache__"
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+find . -type d -name "__pycache__"
+./convert_to_usd.sh 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1\
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+rm -rf logs/
