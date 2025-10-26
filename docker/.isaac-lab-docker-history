@@ -116,3 +116,38 @@ watch nvidia-smi
 ps aux
 kill -9 69
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --agent skrl_sac_cfg_entry_point --algorithm SAC --device cuda:0 --num_envs 32
+nvidia-smi
+ps aux
+kill -9 87
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --task Isaac-F1tenth-Direct-v0 --num_envs 5
+./isaaclab.sh -p source/isaaclab_tasks/isaaclab_tasks/direct/f1tenth/test_f1tenth.py --num_envs 5
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+watch nvidia-smi
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./convert_to_usd.sh
+chmod +x convert_to_usd.sh
+./convert_to_usd.sh
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 64
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 32

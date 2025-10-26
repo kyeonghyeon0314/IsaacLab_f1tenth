@@ -120,6 +120,9 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
         <cylinder radius="0.0508" length="0.0381"/>
       </geometry>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
+      <contact>
+        <lateral_friction value="1.0"/>
+      </contact>
     </collision>
   </link>
 
@@ -154,6 +157,9 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
         <cylinder radius="0.0508" length="0.0381"/>
       </geometry>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
+      <contact>
+        <lateral_friction value="1.0"/>
+      </contact>
     </collision>
   </link>
 
@@ -212,6 +218,9 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
         <cylinder radius="0.0508" length="0.0381"/>
       </geometry>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
+      <contact>
+        <lateral_friction value="1.0"/>
+      </contact>
     </collision>
   </link>
 
@@ -266,6 +275,9 @@ Vehicle: Traxxas Fiesta ST Rally 1/10 Scale
         <cylinder radius="0.0508" length="0.0381"/>
       </geometry>
       <origin xyz="0 0 0" rpy="1.5707963 0 0"/>
+      <contact>
+        <lateral_friction value="1.0"/>
+      </contact>
     </collision>
   </link>
 
