@@ -39,7 +39,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 256, 128]
+        layers: [256, 128, 64]
         activations: [relu, relu, relu]
         output: ONE
 
@@ -59,7 +59,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS
-        layers: [256, 256, 128]
+        layers: [256, 128, 64]
         activations: [relu, relu, relu]
         output: ONE
 
@@ -130,7 +130,7 @@ agent:
 # Replay buffer for SAC
 memory:
   class: RandomMemory
-  memory_size: 10000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
+  memory_size: 6000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
 
 
 # Training configuration
