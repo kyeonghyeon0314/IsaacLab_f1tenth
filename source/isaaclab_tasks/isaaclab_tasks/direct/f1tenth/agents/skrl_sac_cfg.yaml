@@ -115,7 +115,7 @@ agent:
 
   # Batch size for training (scale with num_envs)
   # num_envs=32 → 256 (VRAM 8GB 최적화)
-  batch_size: 1024
+  batch_size: 512
 
   # Entropy regularization
   learn_entropy: True
