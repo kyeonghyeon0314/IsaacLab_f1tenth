@@ -115,7 +115,7 @@ agent:
 
   # Batch size for training (scale with num_envs)
   # num_envs=32 → 256 (VRAM 8GB 최적화)
-  batch_size: 256
+  batch_size: 1024
 
   # Entropy regularization
   learn_entropy: True
@@ -130,7 +130,7 @@ agent:
 # Replay buffer for SAC
 memory:
   class: RandomMemory
-  memory_size: 10000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
+  memory_size: 100000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
 
 
 # Training configuration
