@@ -9,7 +9,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from utils import ContainerInterface, x11_utils
+from utils import ContainerInterface  # x11_utils 제거 (X11 포워딩 비활성화)
 
 
 def parse_cli_args() -> argparse.Namespace:
@@ -110,18 +110,20 @@ def main(args: argparse.Namespace):
 
     print(f"[INFO] Using container profile: {ci.profile}")
     if args.command == "start":
+        # X11 포워딩 비활성화 (성능 향상을 위해)
         # check if x11 forwarding is enabled
-        x11_outputs = x11_utils.x11_check(ci.statefile)
+        # x11_outputs = x11_utils.x11_check(ci.statefile)
         # if x11 forwarding is enabled, add the x11 yaml and environment variables
-        if x11_outputs is not None:
-            (x11_yaml, x11_envar) = x11_outputs
-            ci.add_yamls += x11_yaml
-            ci.environ.update(x11_envar)
+        # if x11_outputs is not None:
+        #     (x11_yaml, x11_envar) = x11_outputs
+        #     ci.add_yamls += x11_yaml
+        #     ci.environ.update(x11_envar)
         # start the container
         ci.start()
     elif args.command == "enter":
+        # X11 포워딩 비활성화
         # refresh the x11 forwarding
-        x11_utils.x11_refresh(ci.statefile)
+        # x11_utils.x11_refresh(ci.statefile)
         # enter the container
         ci.enter()
     elif args.command == "config":
@@ -131,8 +133,9 @@ def main(args: argparse.Namespace):
     elif args.command == "stop":
         # stop the container
         ci.stop()
+        # X11 포워딩 비활성화
         # cleanup the x11 forwarding
-        x11_utils.x11_cleanup(ci.statefile)
+        # x11_utils.x11_cleanup(ci.statefile)
     else:
         raise RuntimeError(f"Invalid command provided: {args.command}. Please check the help message.")
 

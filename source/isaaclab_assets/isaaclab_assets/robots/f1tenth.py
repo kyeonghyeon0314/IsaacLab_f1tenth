@@ -69,11 +69,12 @@ F1TENTH_CFG = ArticulationCfg(
             damping=10.0,  # Very low damping for near-instant response (VESC PID tuning)
         ),
         # Servo Steering (Ackermann) - Position Control
+        # 고성능 서보: 즉시 반응 (실제 F1TENTH 서보 성능)
         "steering": ImplicitActuatorCfg(
             joint_names_expr=[".*steering_hinge_joint"],  # Both steering joints
-            effort_limit_sim=10.0,  # Servo torque
-            stiffness=800.0,  # High stiffness for position control
-            damping=100.0,
+            effort_limit_sim=50.0,  # 높은 토크 (10 → 50)
+            stiffness=10000.0,  # 매우 높은 강성으로 즉시 반응 (800 → 10000)
+            damping=500.0,  # 과진동 방지를 위한 높은 감쇠 (100 → 500)
         ),
         # Front wheels: Free-rolling (no actuator, RWD configuration)
         # Front wheels rotate freely without motor control

@@ -20,35 +20,94 @@ import torch.nn as nn
 from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
 
 
+class AngleBasedFeatureExtractor(nn.Module):
+    """
+    Angle-based LiDAR feature extraction (Stage 1: No CNN).
+
+    Compresses 1080-dimensional LiDAR scan into 128-dimensional feature vector
+    by grouping rays into angular bins and extracting min distance per bin.
+
+    Architecture:
+        LiDAR(1080) → Angular Binning (128 bins) → Min Pooling → Features(128)
+
+    LiDAR specs:
+        - 1080 rays covering ±135° (270° total)
+        - Each ray: 0.25° apart
+        - Ray 0: -135°, Ray 540: 0° (forward), Ray 1079: +135°
+    """
+
+    def __init__(self, input_size: int = 1080, output_size: int = 128):
+        super().__init__()
+
+        self.input_size = input_size
+        self.output_size = output_size
+
+        # 각 bin의 크기 (레이 개수)
+        # 1080 / 128 = 8.4 → 각 bin은 약 8~9개 레이
+        self.bin_size = input_size // output_size
+
+        # 남은 레이 처리
+        self.remainder = input_size % output_size
+
+    def forward(self, lidar: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            lidar: (batch_size, 1080) LiDAR scan
+
+        Returns:
+            features: (batch_size, 128) angular features
+        """
+        batch_size = lidar.shape[0]
+        features = []
+
+        start_idx = 0
+        for i in range(self.output_size):
+            # 각 bin의 크기 결정 (남은 레이를 앞쪽 bin들에 분배)
+            current_bin_size = self.bin_size + (1 if i < self.remainder else 0)
+            end_idx = start_idx + current_bin_size
+
+            # 해당 각도 구간의 최소 거리 추출 (가장 가까운 장애물)
+            bin_rays = lidar[:, start_idx:end_idx]
+            min_distance = torch.min(bin_rays, dim=1, keepdim=True).values
+            features.append(min_distance)
+
+            start_idx = end_idx
+
+        # (batch, 128, 1) → (batch, 128)
+        features = torch.cat(features, dim=1)
+
+        return features
+
+
 class LidarFeatureExtractor(nn.Module):
     """
-    1D CNN for LiDAR feature extraction.
+    1D CNN for LiDAR feature extraction (Stage 2: With CNN).
 
-    Compresses 1080-dimensional LiDAR scan into 64-dimensional feature vector
+    Compresses 1080-dimensional LiDAR scan into 128-dimensional feature vector
     by learning spatial patterns (walls, corners, obstacles).
 
     Architecture inspired by TinyLidarNet:
-        Conv1d(1→32, k=5, s=2) → ReLU    # 1080 → 538
-        Conv1d(32→64, k=3, s=2) → ReLU   # 538 → 268
-        Conv1d(64→64, k=3, s=2) → ReLU   # 268 → 133
-        Flatten                           # 64×133 = 8512
-        Linear(8512 → 64)                 # Compress to 64
+        Conv1d(1→32, k=5, s=2) → ReLU    # 1080 → 540
+        Conv1d(32→64, k=3, s=2) → ReLU   # 540 → 270
+        Conv1d(64→128, k=3, s=2) → ReLU  # 270 → 135
+        Flatten                           # 128×135 = 17280
+        Linear(17280 → 128)               # Compress to 128
     """
 
-    def __init__(self, input_size: int = 1080, output_size: int = 64):
+    def __init__(self, input_size: int = 1080, output_size: int = 128):
         super().__init__()
 
         self.cnn = nn.Sequential(
-            # Conv Block 1: Extract low-level features
+            # Conv Block 1: Extract low-level features (1→32 channels)
             nn.Conv1d(in_channels=1, out_channels=32, kernel_size=5, stride=2, padding=2),
             nn.ReLU(),
 
-            # Conv Block 2: Extract mid-level features
+            # Conv Block 2: Extract mid-level features (32→64 channels)
             nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
 
-            # Conv Block 3: Extract high-level features
-            nn.Conv1d(in_channels=64, out_channels=64, kernel_size=3, stride=2, padding=1),
+            # Conv Block 3: Extract high-level features (64→128 channels)
+            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
         )
 
@@ -57,8 +116,8 @@ class LidarFeatureExtractor(nn.Module):
         # After Conv1: (1080 + 2*2 - 5)/2 + 1 = 540
         # After Conv2: (540 + 2*1 - 3)/2 + 1 = 270
         # After Conv3: (270 + 2*1 - 3)/2 + 1 = 135
-        # Total: 64 * 135 = 8640
-        self.flatten_size = 8640
+        # Total: 128 * 135 = 17280
+        self.flatten_size = 17280
 
         # Compression layer
         self.fc = nn.Linear(self.flatten_size, output_size)
@@ -98,31 +157,42 @@ class CNNMLPPolicy(GaussianMixin, Model):
         - Actions (2): steering_velocity, target_velocity
 
     Architecture:
-        LiDAR (1080) → CNN → features (64)
+        LiDAR (1080) → CNN → features (128)
         Vehicle state (2) → pass through
-        Concat (66) → MLP (66→64→64→2) → actions
+        Concat (130) → MLP (130→128→128→2) → actions
     """
 
     def __init__(self, observation_space, action_space, device,
                  clip_actions=False, clip_log_std=True,
                  min_log_std=-20, max_log_std=2,
-                 reduction="sum", initial_log_std=0):
+                 reduction="sum", initial_log_std=0,
+                 use_angle_based=False):
         Model.__init__(self, observation_space, action_space, device)
         GaussianMixin.__init__(self, clip_actions, clip_log_std,
                               min_log_std, max_log_std, reduction)
 
-        # LiDAR feature extractor
-        self.lidar_extractor = LidarFeatureExtractor(
-            input_size=1080,
-            output_size=64
-        )
+        # LiDAR feature extractor (선택 가능)
+        if use_angle_based:
+            print("[INFO] Policy: Using AngleBasedFeatureExtractor (Stage 1)")
+            self.lidar_extractor = AngleBasedFeatureExtractor(
+                input_size=1080,
+                output_size=128
+            )
+        else:
+            print("[INFO] Policy: Using CNN LidarFeatureExtractor (Stage 2)")
+            self.lidar_extractor = LidarFeatureExtractor(
+                input_size=1080,
+                output_size=128
+            )
 
-        # MLP: processes concatenated features (64 + 2 = 66)
-        # Architecture: 66 → 64 → 64 → 2 (matches YAML config)
+        # MLP: processes concatenated features (128 + 2 = 130)
+        # Architecture: 130 → 128 → 128 → 64 → 2
         self.mlp = nn.Sequential(
-            nn.Linear(66, 64),
+            nn.Linear(130, 128),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, self.num_actions),  # 2 actions
             nn.Tanh()  # squash to [-1, 1]
@@ -154,10 +224,10 @@ class CNNMLPPolicy(GaussianMixin, Model):
         vehicle_state = states[:, 1080:]   # (batch, 2)
 
         # Extract LiDAR features
-        lidar_features = self.lidar_extractor(lidar)  # (batch, 64)
+        lidar_features = self.lidar_extractor(lidar)  # (batch, 128)
 
         # Concatenate features
-        features = torch.cat([lidar_features, vehicle_state], dim=1)  # (batch, 66)
+        features = torch.cat([lidar_features, vehicle_state], dim=1)  # (batch, 130)
 
         # Pass through MLP
         mean = self.mlp(features)  # (batch, 2)
@@ -184,20 +254,30 @@ class CNNMLPCritic(DeterministicMixin, Model):
     """
 
     def __init__(self, observation_space, action_space, device,
-                 clip_actions=False):
+                 clip_actions=False, use_angle_based=False):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions)
 
-        # LiDAR feature extractor (shared architecture with policy)
-        self.lidar_extractor = LidarFeatureExtractor(
-            input_size=1080,
-            output_size=64
-        )
+        # LiDAR feature extractor (선택 가능)
+        if use_angle_based:
+            print("[INFO] Critic: Using AngleBasedFeatureExtractor (Stage 1)")
+            self.lidar_extractor = AngleBasedFeatureExtractor(
+                input_size=1080,
+                output_size=128
+            )
+        else:
+            print("[INFO] Critic: Using CNN LidarFeatureExtractor (Stage 2)")
+            self.lidar_extractor = LidarFeatureExtractor(
+                input_size=1080,
+                output_size=128
+            )
 
-        # MLP: processes concatenated features (64 + 2 + 2 = 68)
-        # Architecture: 68 → 256 → 128 → 64 → 1 (matches YAML config)
+        # MLP: processes concatenated features (128 + 2 + 2 = 132)
+        # Architecture: 132 → 256 → 128 → 64 → 1 (matches YAML config)
         self.mlp = nn.Sequential(
-            nn.Linear(68, 256),
+            nn.Linear(132, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),

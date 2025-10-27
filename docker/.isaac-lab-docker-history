@@ -185,3 +185,39 @@ rm -rf logs/
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
 find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
 rm -rf logs/
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 16
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm PPO --device cuda:0 --num_envs 16
+tensorboard --logdir /workspace/isaaclab/logs/skrl/f1tenth_sac/2025-10-26_18-48-21_sac_torch
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm PPO --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm PPO --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+rm -rf logs/
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 2
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint /logs/skrl/f1tenth_sac/202525-10-26_23-52-48_sac_torch/checkpoints/agent_10000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/202525-10-26_23-52-48_sac_torch/checkpoints/agent_10000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/2025-10-26_23-52-48_sac_torch/checkpoints/agent_10000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/2025-10-2-27_00-10-04_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-10-04_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-0-23-25_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-23-25_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 1 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-32-34_sac_torch/checkpoints/agent_10000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-32-34_sac_torch/checkpoints/agent_10000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 8-checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-43-36_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-43-36_sac_torch/checkpoints/agent_5000.pt
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_00-50-01_sac_torch/checkpoints/agent_5000.pt
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --
+rm -rf logs/
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --chstage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --stage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 4 --stage 1
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+rm -rf logs/
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 6 --stage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_0-06-20-34_sac_torch/checkpoints/agent_best.pt --stage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_0-06-20-34_sac_torch/checkpoints/best_agent.pt --stage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_06-20-34_sac_torch/checkpoints/best_agent.pt --stage 1

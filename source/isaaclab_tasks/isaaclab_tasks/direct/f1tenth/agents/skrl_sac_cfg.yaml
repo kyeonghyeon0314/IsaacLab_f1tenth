@@ -19,8 +19,8 @@ models:
     network:
       - name: net
         input: STATES  # LiDAR + vehicle state
-        layers: [64, 64, 2]
-        activations: [relu,relu, tanh]
+        layers: [128, 128, 64, 2]
+        activations: [relu, relu, relu, tanh]
         output: ACTIONS  # 2D 출력
 
   critic_1:  # First Q-network
@@ -29,7 +29,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 128, 128]
+        layers: [256, 256, 128, 64, 1]
         activations: relu
         output: ONE
 
@@ -39,7 +39,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS  # skrl special keyword: auto-concatenates states and actions
-        layers: [256, 128, 128]
+        layers: [256, 256, 128, 64, 1]
         activations: relu
         output: ONE
 
@@ -49,7 +49,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS
-        layers: [256, 128, 128]
+        layers: [256, 256, 128, 64, 1]
         activations: relu
         output: ONE
 
@@ -59,7 +59,7 @@ models:
     network:
       - name: net
         input: STATES_ACTIONS
-        layers: [256, 128, 128]
+        layers: [256, 256, 128, 64, 1]
         activations: relu
         output: ONE
 
@@ -73,7 +73,7 @@ agent:
     directory: f1tenth_sac
     experiment_name: ""
     write_interval: 1000
-    checkpoint_interval: 10000
+    checkpoint_interval: 5000
 
   # SAC-specific: gradient steps per environment interaction
   gradient_steps: 1  # Number of gradient updates per step (SAC default)
@@ -105,7 +105,7 @@ agent:
   value_preprocessor_kwargs: null
 
   # Random timesteps for exploration
-  random_timesteps: 1000  # 80에서 1000으로 증가
+  random_timesteps: 80  # 80에서 100으로 증가
 
   # Learning starts after this many steps
   learning_starts: 1000
@@ -115,7 +115,7 @@ agent:
 
   # Batch size for training (scale with num_envs)
   # num_envs=32 → 256 (VRAM 8GB 최적화)
-  batch_size: 512
+  batch_size: 256
 
   # Entropy regularization
   learn_entropy: True
@@ -130,7 +130,7 @@ agent:
 # Replay buffer for SAC
 memory:
   class: RandomMemory
-  memory_size: 6000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
+  memory_size: 10000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
 
 
 # Training configuration

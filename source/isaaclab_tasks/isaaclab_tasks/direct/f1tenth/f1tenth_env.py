@@ -69,7 +69,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     )
 
     # 환경 설정
-    episode_length_s = 100.0  # 지속적인 학습을 위해 긴 에피소드 길이 
+    episode_length_s = 20.0  # 지속적인 학습을 위해 긴 에피소드 길이 
     decimation = 2
 
     # 행동 공간
@@ -101,10 +101,10 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
 
     # 무작위화를 위한 스폰 영역
     vehicle_spawn_zone: dict = {
-        "x_range": (0.0, 0.0),           # X축 스폰 범위 [최소, 최대]
-        "y_range": (-0.70, -0.60),           # Y축 스폰 범위 [최소, 최대]
+        "x_range": (0, 0),           # X축 스폰 범위 [최소, 최대]
+        "y_range": (-0.67, -0.65),           # Y축 스폰 범위 [최소, 최대]
         "z_fixed": -0.5,                   # 고정 Z 높이 (충돌 방지)
-        "yaw_range": (-math.pi/8, 0), # Yaw 방향 범위 [최소, 최대]
+        "yaw_range": (-math.pi /8, 0), # Yaw 방향 범위 [최소, 최대]
     }
 
     # 트랙 중심선 waypoints (X, Y 좌표)
@@ -187,6 +187,7 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_forward_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward_speed_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward_survival_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_danger_penalty_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_termination_penalty_sum = torch.zeros(self.num_envs, device=self.device)
 
 
@@ -474,10 +475,13 @@ class F1TenthEnv(DirectRLEnv):
     def _get_rewards(self) -> torch.Tensor:
         """
         트랙 진행 거리 기반 보상 함수 (학습 초기 탐험 장려):
-        - 트랙 진행: 중심선을 따라 1m당 30점
+        - 트랙 진행: 중심선을 따라 1m당 10점
         - 저속 페널티: 1 m/s 미만일 때 선형 페널티 (0 m/s = -0.01, 1 m/s = 0)
         - 속도 보상: 전방 속도에 비례 (최대 5 m/s)
-        - 종료 벌점: 충돌 또는 STUCK 시 -100점 (grace period 5 step)
+        - 위험 패널티 (2단계):
+          * 벽과 25cm 이내: 매 스텝 -1.5점 (경고)
+          * 벽과 10cm 이내: 매 스텝 -20점 (위험)
+        - 충돌 패널티: 제거 (연속적 위험 패널티로 대체)
         """
         pos = self.robot.data.root_state_w[:, :3]
         vel = self.robot.data.root_state_w[:, 7:10]
@@ -492,7 +496,7 @@ class F1TenthEnv(DirectRLEnv):
   
         collision_detected = self._detect_collision_consecutive(
             self.lidar_distances,
-            threshold=0.1,  # 10cm 충돌 임계값
+            threshold=0.15,  # 15cm 충돌 임계값
             consecutive_count=10  # 더 강력한 감지를 위해 5에서 10으로 증가 (2.5° 범위)
         )
         # Grace Period 내 환경은 충돌로 판별하지 않음
@@ -513,32 +517,61 @@ class F1TenthEnv(DirectRLEnv):
 
         # -- 보상 계산 --
         # 1) 트랙 진행 거리 보상
+        # progress_delta: 트랙 진행 거리 (미터 단위)
+        # 가중치를 높여서 진행 거리를 더 중요하게 만듦
         _, progress_delta = self._get_track_progress(pos)
-        reward_forward = torch.clamp(progress_delta, min=0.0) * 30
+        reward_forward = torch.clamp(progress_delta, min=0.0) * 18  # 10 → 15으로 증가
 
         # 2) 속도 보상
         forward_direction = self._get_centerline_direction()
         vel_xy = vel[:, :2]
         forward_speed_raw = torch.sum(vel_xy * forward_direction, dim=-1)
-        reward_speed = torch.clamp(forward_speed_raw / 5.0, 0.0, 1.0) * 1.0
+        reward_speed = torch.clamp(forward_speed_raw / 5.0, 0.0, 1.0) * 1.2
 
-        # 3) 저속 페널티 (실제 속도 기반)
-        # 1m/s 미만으로 느리게 움직이는 행동을 억제합니다.
-        # 선형 페널티: 0 m/s → -0.01, 1 m/s → 0
-        speed_threshold = 1.0
-        slow_speed_mask = forward_speed_raw < speed_threshold
+        # 3) 저속 페널티 (3단계 구조)
+        # 빠른 주행을 유도하기 위한 속도별 차등 패널티
+        # - 0-1m/s: -2.0/step (매우 느림)
+        # - 1-2m/s: -0.5/step (느림)
+        # - 2m/s 이상: 패널티 없음
         reward_survival = torch.zeros(self.num_envs, device=self.device)
-        reward_survival[slow_speed_mask] = -0.01 * (1.0 - forward_speed_raw[slow_speed_mask] / speed_threshold)
 
-        # 4) 충돌/STUCK 벌점 (현재 스텝 기준)
+        # 매우 느림: 0-1m/s
+        Too_very_slow_mask = forward_speed_raw < 0.3
+        reward_survival[Too_very_slow_mask] = -1.0
+
+        very_slow_mask = (forward_speed_raw >= 0.3) & (forward_speed_raw < 0.8)
+        reward_survival[very_slow_mask] = -0.5
+        # 느림: 1-2m/s
+        slow_mask = (forward_speed_raw >= 0.8) & (forward_speed_raw < 1.5)
+        reward_survival[slow_mask] = -0.2
+
+        # 빠름: 2m/s 이상 -> 패널티 없음 (0)
+
+        # 4) 연속적 위험 패널티 (2단계 구조)
+        # - 25cm 이내: -1.5점/step (경고)
+        # - 10cm 이내: -20점/step (위험)
+        min_distance = torch.min(self.lidar_distances, dim=1).values
+
+        # 2단계 패널티 적용
+        danger_penalty = torch.zeros(self.num_envs, device=self.device)
+
+        # 10cm 이내: 매우 위험 (-20점)
+        very_close_mask = min_distance < 0.1
+        danger_penalty[very_close_mask] = -20.0
+
+        # 25cm 이내 (10cm 제외): 경고 (-1.5점)
+        close_mask = (min_distance >= 0.1) & (min_distance < 0.25)
+        danger_penalty[close_mask] = -1.5
+
+        # 5) 충돌/STUCK 벌점 제거 (벽 근처 패널티로 대체)
         termination_penalty = torch.zeros(self.num_envs, device=self.device)
 
-        # Grace Period가 아닐 때만 페널티 적용
-        apply_penalty = (self.collision_terminated | self.stuck_terminated) & ~in_grace_period
-        termination_penalty[apply_penalty] = -100
+        # 충돌 패널티 제거 - 벽 근처 연속 패널티만 사용
+        # apply_penalty = (self.collision_terminated | self.stuck_terminated) & ~in_grace_period
+        # termination_penalty[apply_penalty] = 0  # 충돌 패널티 제거
 
         # 총 보상
-        reward = reward_forward + reward_survival + reward_speed + termination_penalty
+        reward = reward_forward + reward_survival + reward_speed + danger_penalty + termination_penalty
 
         # 에피소드 통계 누적
         self.episode_reward_sum += reward
@@ -547,6 +580,7 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_forward_sum += reward_forward
         self.episode_reward_speed_sum += reward_speed
         self.episode_reward_survival_sum += reward_survival
+        self.episode_danger_penalty_sum += danger_penalty
         self.episode_termination_penalty_sum += termination_penalty
 
         # 바퀴 속도 로깅 제거됨
@@ -600,13 +634,14 @@ class F1TenthEnv(DirectRLEnv):
                 total_forward_reward = self.episode_reward_forward_sum[idx].item()
                 total_speed_reward = self.episode_reward_speed_sum[idx].item()
                 total_survival_reward = self.episode_reward_survival_sum[idx].item()
+                total_danger_penalty = self.episode_danger_penalty_sum[idx].item()
                 total_penalty = self.episode_termination_penalty_sum[idx].item()
 
                 # 요약 로그 출력
                 print(f"\n[EPISODE END] Env {idx.item()} | {reason} | Steps: {ep_len}")
                 print(f"  > Progress: {total_dist:.2f}m, Laps: {lap_num}")
                 print(f"  > Speeds (avg m/s): Cmd={avg_cmd_speed:.2f}, Actual={avg_actual_speed:.2f}")
-                print(f"  > Rewards: Total={total_reward:.2f}, Avg={avg_reward:.3f} | (Fwd: {total_forward_reward:.2f}, Speed: {total_speed_reward:.2f}, SlowPen: {total_survival_reward:.2f}, TermPen: {total_penalty:.2f})")
+                print(f"  > Rewards: Total={total_reward:.2f}, Avg={avg_reward:.3f} | (Fwd: {total_forward_reward:.2f}, Speed: {total_speed_reward:.2f}, SlowPen: {total_survival_reward:.2f}, DangerPen: {total_danger_penalty:.2f})")
 
         return terminated, time_out
 
@@ -679,6 +714,7 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_forward_sum[env_ids] = 0.0
         self.episode_reward_speed_sum[env_ids] = 0.0
         self.episode_reward_survival_sum[env_ids] = 0.0
+        self.episode_danger_penalty_sum[env_ids] = 0.0
         self.episode_termination_penalty_sum[env_ids] = 0.0
 
         # LiDAR 센서 데이터 초기화
