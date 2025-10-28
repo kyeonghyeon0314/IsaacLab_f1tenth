@@ -10,6 +10,7 @@ import os
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
+from isaaclab.sim import CollisionPropertiesCfg, MdlFileCfg, RigidBodyMaterialCfg
 
 ##
 # Configuration
@@ -31,12 +32,18 @@ F1TENTH_CFG = ArticulationCfg(
             max_depenetration_velocity=5.0,
             enable_gyroscopic_forces=True,
         ),
+        # articulation_props: Articulation-level properties for the robot.
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
-            solver_position_iteration_count=8,  # Higher for stability
+            solver_position_iteration_count=8,
             solver_velocity_iteration_count=4,
             sleep_threshold=0.001,
             stabilization_threshold=0.0005,
+        ),
+        # mass_props: Mass properties for the robot's links.
+        # Set the mass of the chassis to a more realistic value.
+        mass_props=sim_utils.MassPropertiesCfg(
+            mass=6.0,  # Approximate mass of F1TENTH car in kg
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -63,10 +70,10 @@ F1TENTH_CFG = ArticulationCfg(
         # VESC 6 MkV: High-torque brushless motor with instant RPM response
         "rear_wheels": ImplicitActuatorCfg(
             joint_names_expr=[".*rear_wheel_joint"],  # Both rear wheels
-            effort_limit_sim=8.5,  # High torque for instant acceleration (VESC capability)
+            effort_limit_sim=85.0,  # Increased torque
             velocity_limit=196.0,  # Max wheel angular velocity (10 m/s / 0.0508 m)
-            stiffness=50.0,  # Velocity control mode
-            damping=10.0,  # Very low damping for near-instant response (VESC PID tuning)
+            stiffness=5000.0,  # Increased for stronger velocity control
+            damping=1000.0,  # Increased for stronger velocity control
         ),
         # Servo Steering (Ackermann) - Position Control
         # 고성능 서보: 즉시 반응 (실제 F1TENTH 서보 성능)

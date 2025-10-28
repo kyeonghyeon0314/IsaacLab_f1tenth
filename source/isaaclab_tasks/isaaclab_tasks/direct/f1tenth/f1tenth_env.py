@@ -23,7 +23,7 @@ from isaaclab.assets import Articulation, ArticulationCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import RayCaster, RayCasterCfg, patterns
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import SimulationCfg, RigidBodyMaterialCfg
 from isaaclab.sim.spawners.from_files import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.math import sample_uniform
@@ -49,7 +49,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
         usd_path=os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
             "/workspace/isaaclab/source/isaaclab_assets/isaaclab_assets/f1tenth/tracks/underground_track_physics.usd"
-        ),
+        )
     )
 
     # LiDAR - 레이저 링크에 부착 (URDF: base_to_laser 조인트, xyz="0.275 0 0.19")
@@ -144,8 +144,8 @@ class F1TenthEnv(DirectRLEnv):
               " front:", getattr(self, "_front_wheel_names", self._front_wheel_ids))
         print("ACTUATORS KEYS:", list(self.robot.actuators.keys()) if hasattr(self.robot, "actuators") else "no actuators")
 
-        self.action_scale_steering = torch.tensor([cfg.action_scale_steering], device=self.device)
-        # action_scale_velocity는 직접 속도 제어로 변경되어 더 이상 필요 없음
+        # 조향은 위치 제어로 변경되어 action_scale_steering 불필요
+        # 속도는 직접 제어로 변경되어 action_scale_velocity 불필요
         self.previous_pos = torch.zeros(self.num_envs, 3, device=self.device)
         self.previous_total_distance = torch.zeros(self.num_envs, device=self.device)
 
@@ -183,11 +183,21 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_commanded_speed_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_actual_speed_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_commanded_steering_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_actual_steering_sum = torch.zeros(self.num_envs, device=self.device)
         # 보상 항목별 통계
         self.episode_reward_forward_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward_speed_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward_survival_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_danger_penalty_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_termination_penalty_sum = torch.zeros(self.num_envs, device=self.device)
+
+        # -- 추가된 디버깅 통계 --
+        self.episode_steering_angle_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_commanded_wheel_vel_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_actual_wheel_vel_sum = torch.zeros(self.num_envs, device=self.device)
+        self.episode_min_commanded_vel = torch.full((self.num_envs,), float("inf"), device=self.device)
+
 
 
         print(f"Steering joint limits: {self.robot.data.soft_joint_pos_limits[0, self._steering_joint_ids]}")
@@ -232,6 +242,10 @@ class F1TenthEnv(DirectRLEnv):
         v_min = self.cfg.vehicle_params["v_min"]
         v_max = self.cfg.vehicle_params["v_max"]
         self.target_velocity = (actions[:, 1] + 1.0) / 2.0 * (v_max - v_min) + v_min
+        # 클램핑 전 최소 속도 기록
+        self.episode_min_commanded_vel = torch.min(self.episode_min_commanded_vel, self.target_velocity)
+        # v_min 이상으로 클램핑하여 후진 방지
+        self.target_velocity = torch.clamp(self.target_velocity, min=v_min)
 
     def _apply_action(self) -> None:
         """로봇에 제어 명령을 적용합니다."""
@@ -553,10 +567,26 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_sum += reward
         self.episode_commanded_speed_sum += self.target_velocity
         self.episode_actual_speed_sum += forward_speed_raw
+
+        # 조향각 통계 (명령값과 실제값)
+        current_steering_angle = self.robot.data.joint_pos[:, self._steering_joint_ids].mean(dim=-1)
+        self.episode_commanded_steering_sum += self.target_steering.squeeze(-1)
+        self.episode_actual_steering_sum += current_steering_angle
+
         self.episode_reward_forward_sum += reward_forward
         self.episode_reward_speed_sum += reward_speed
         self.episode_reward_survival_sum += reward_survival
         self.episode_danger_penalty_sum += danger_penalty
+
+        # -- 추가된 디버깅 통계 누적 --
+        # 조향각 (평균)
+        current_steering_angle = self.robot.data.joint_pos[:, self._steering_joint_ids].mean(dim=-1)
+        self.episode_steering_angle_sum += torch.abs(current_steering_angle)
+        # 바퀴 각속도 (명령 vs 실제)
+        commanded_wheel_vel = self.target_velocity / self.wheel_radius
+        self.episode_commanded_wheel_vel_sum += torch.abs(commanded_wheel_vel)
+        actual_wheel_vel = self.robot.data.joint_vel[:, self._rear_wheel_ids].mean(dim=-1)
+        self.episode_actual_wheel_vel_sum += torch.abs(actual_wheel_vel)
 
         # 바퀴 속도 로깅 제거됨
 
@@ -611,10 +641,22 @@ class F1TenthEnv(DirectRLEnv):
                 total_survival_reward = self.episode_reward_survival_sum[idx].item()
                 total_danger_penalty = self.episode_danger_penalty_sum[idx].item()
 
+                # 추가 디버깅 통계 계산
+                avg_steering_angle = self.episode_steering_angle_sum[idx].item() / ep_len
+                avg_cmd_steering = self.episode_commanded_steering_sum[idx].item() / ep_len
+                avg_actual_steering = self.episode_actual_steering_sum[idx].item() / ep_len
+                min_cmd_vel = self.episode_min_commanded_vel[idx].item()
+                # rad/s를 m/s로 변환
+                avg_cmd_wheel_vel_ms = (self.episode_commanded_wheel_vel_sum[idx].item() / ep_len) * self.wheel_radius
+                avg_actual_wheel_vel_ms = (self.episode_actual_wheel_vel_sum[idx].item() / ep_len) * self.wheel_radius
+
                 # 요약 로그 출력
                 print(f"\n[EPISODE END] Env {idx.item()} | {reason} | Steps: {ep_len}")
                 print(f"  > Progress: {total_dist:.2f}m, Laps: {lap_num}")
-                print(f"  > Speeds (avg m/s): Cmd={avg_cmd_speed:.2f}, Actual={avg_actual_speed:.2f}")
+                print(f"  > Body Speeds (avg m/s): Cmd={avg_cmd_speed:.2f}, Actual={avg_actual_speed:.2f}")
+                print(f"  > Steering Angles (avg rad): Cmd={avg_cmd_steering:.3f}, Actual={avg_actual_steering:.3f}, AbsAvg={avg_steering_angle:.3f}")
+                print(f"  > Wheel Vel (avg m/s): Cmd={avg_cmd_wheel_vel_ms:.2f}, Actual={avg_actual_wheel_vel_ms:.2f}")
+                print(f"  > Min Cmd Vel (m/s): {min_cmd_vel:.3f}")
                 print(f"  > Rewards: Total={total_reward:.2f}, Avg={avg_reward:.3f} | (Fwd: {total_forward_reward:.2f}, Speed: {total_speed_reward:.2f}, SlowPen: {total_survival_reward:.2f}, DangerPen: {total_danger_penalty:.2f})")
 
         return terminated, time_out
@@ -685,10 +727,16 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_sum[env_ids] = 0.0
         self.episode_commanded_speed_sum[env_ids] = 0.0
         self.episode_actual_speed_sum[env_ids] = 0.0
+        self.episode_commanded_steering_sum[env_ids] = 0.0
+        self.episode_actual_steering_sum[env_ids] = 0.0
         self.episode_reward_forward_sum[env_ids] = 0.0
         self.episode_reward_speed_sum[env_ids] = 0.0
         self.episode_reward_survival_sum[env_ids] = 0.0
         self.episode_danger_penalty_sum[env_ids] = 0.0
+        self.episode_steering_angle_sum[env_ids] = 0.0
+        self.episode_commanded_wheel_vel_sum[env_ids] = 0.0
+        self.episode_actual_wheel_vel_sum[env_ids] = 0.0
+        self.episode_min_commanded_vel[env_ids] = float("inf")
 
         # LiDAR 센서 데이터 초기화
         if self.lidar_distances is not None:

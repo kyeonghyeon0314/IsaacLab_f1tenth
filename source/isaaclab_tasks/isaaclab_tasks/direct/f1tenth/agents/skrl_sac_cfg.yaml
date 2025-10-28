@@ -16,7 +16,7 @@ models:
     clip_log_std: True
     min_log_std: -20.0
     max_log_std: 2.0
-    initial_log_std: 0.0
+    initial_log_std: 0.5
     
   critic_1:  # 첫 번째 Q-네트워크
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPCritic

@@ -79,6 +79,7 @@ from datetime import datetime
 
 import omni
 import skrl
+import torch
 from packaging import version
 
 # check for minimum supported skrl version
@@ -269,6 +270,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             agent_cfg_sac["state_preprocessor_kwargs"] = agent_cfg["agent"]["state_preprocessor_kwargs"]
 
             # Value preprocessor (normalizes Q-values for training stability)
+            # Note: SAC uses Q(s,a) not V(s), so value_preprocessor may not be used by skrl's SAC
             if "value_preprocessor" in agent_cfg["agent"] and agent_cfg["agent"]["value_preprocessor"]:
                 agent_cfg_sac["value_preprocessor"] = RunningStandardScaler
                 agent_cfg_sac["value_preprocessor_kwargs"] = agent_cfg["agent"].get("value_preprocessor_kwargs", None)
@@ -314,12 +316,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             print(f"       - Critic MLP: {critic_arch}")
 
             # Print preprocessor info
-            state_prep = agent._state_preprocessor is not None
-            value_prep = agent._value_preprocessor is not None
+            state_prep = hasattr(agent, '_state_preprocessor') and agent._state_preprocessor is not None
+            value_prep = hasattr(agent, '_value_preprocessor') and agent._value_preprocessor is not None
             print(f"[INFO] Preprocessors: State={state_prep}, Value={value_prep}")
 
             # ===== Optimizer setup: CNN + MLP 동시 학습 =====
-            import torch
             import torch.optim as optim
 
             print("[INFO] Training CNN + MLP together")
@@ -374,7 +375,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             use_custom_f1tenth_models = True  # Mark as handled
 
         except Exception as e:
+            import traceback
             print(f"[WARNING] Failed to setup F1TENTH CNN+MLP models: {e}")
+            print("          Full traceback:")
+            traceback.print_exc()
             print("          Falling back to default Runner with MLP models")
             use_custom_f1tenth_models = False
 
