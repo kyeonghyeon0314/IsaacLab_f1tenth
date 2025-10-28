@@ -73,9 +73,9 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     decimation = 2
 
     # 행동 공간
-    action_scale_steering = 3.2  # 조향 속도 스케일
-    # action[:, 0]: 조향 속도 [-1, 1] → [-3.2, 3.2] rad/s
-    # action[:, 1]: 목표 선속도 [-1, 1] → [v_min, v_max] m/s (직접 속도 제어)
+    max_steering_angle = 0.4  # 최대 조향 각도 (rad, 약 ±23도)
+    # action[:, 0]: 목표 조향 각도 [-1, 1] → [-0.4, 0.4] rad (위치 제어)
+    # action[:, 1]: 목표 선속도 [-1, 1] → [v_min, v_max] m/s (속도 제어)
     action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)   # SAC 맞춤 설정
 
     # 관찰 공간 (LiDAR만 사용)
@@ -188,7 +188,6 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_speed_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_reward_survival_sum = torch.zeros(self.num_envs, device=self.device)
         self.episode_danger_penalty_sum = torch.zeros(self.num_envs, device=self.device)
-        self.episode_termination_penalty_sum = torch.zeros(self.num_envs, device=self.device)
 
 
         print(f"Steering joint limits: {self.robot.data.soft_joint_pos_limits[0, self._steering_joint_ids]}")
@@ -512,15 +511,17 @@ class F1TenthEnv(DirectRLEnv):
         # 속도가 0에 가까워질수록 페널티가 급증
         # 공식: -A / (speed/target) + A  (target 속도에서 0)
         TARGET_SPEED_FOR_PENALTY = 1.0  # 1.0 m/s
-        PENALTY_SCALE_SLOW = 2.0
+        PENALTY_SCALE_SLOW = 1.0
         MIN_SPEED_RATIO = 0.05  # 역수 폭발 방지
 
         speed_ratio = torch.clamp(forward_speed_raw / TARGET_SPEED_FOR_PENALTY, min=MIN_SPEED_RATIO, max=10.0)
         reward_survival = -PENALTY_SCALE_SLOW / speed_ratio + PENALTY_SCALE_SLOW
+        # Clipping to prevent excessive penalty (Phase 1: Reward normalization)
+        reward_survival = torch.clamp(reward_survival, min=-10.0, max=1.0)
         # speed = 1.0 m/s → ratio=1.0 → penalty=0
-        # speed = 0.5 m/s → ratio=0.5 → penalty=-2.0
-        # speed = 0.1 m/s → ratio=0.1 → penalty=-18.0
-        # speed = 0.05 m/s → ratio=0.05 → penalty=-38.0
+        # speed = 0.5 m/s → ratio=0.5 → penalty=-2.0 (clipped)
+        # speed = 0.1 m/s → ratio=0.1 → penalty=-10.0 (clipped from -18)
+        # speed = 0.05 m/s → ratio=0.05 → penalty=-10.0 (clipped from -38)
 
         # 4) 연속적 위험 패널티 (지수 함수)
         # 벽에 가까워질수록 페널티가 지수적으로 증가
@@ -528,7 +529,7 @@ class F1TenthEnv(DirectRLEnv):
         min_distance = torch.min(self.lidar_distances, dim=1).values
 
         WARNING_DISTANCE = 0.25  # 25cm부터 페널티 시작
-        PENALTY_SCALE_DANGER = 3.0
+        PENALTY_SCALE_DANGER = 4.0
         EXP_STEEPNESS_DANGER = 8.0
 
         # 근접도 계산 (0보다 작으면 0으로 clamp)
@@ -538,20 +539,15 @@ class F1TenthEnv(DirectRLEnv):
         danger_penalty = -PENALTY_SCALE_DANGER * (
             torch.exp(EXP_STEEPNESS_DANGER * proximity) - 1.0
         )
+        # Clipping to prevent excessive penalty (Phase 1: Reward normalization)
+        danger_penalty = torch.clamp(danger_penalty, min=-10.0, max=0.0)
         # distance = 25cm → proximity=0.0 → penalty=0
-        # distance = 20cm → proximity=0.05 → penalty=-1.5
-        # distance = 10cm → proximity=0.15 → penalty=-7.0
-        # distance = 5cm → proximity=0.20 → penalty=-11.9
+        # distance = 20cm → proximity=0.05 → penalty=-1.5 (no clipping)
+        # distance = 10cm → proximity=0.15 → penalty=-7.0 (no clipping)
+        # distance = 5cm → proximity=0.20 → penalty=-10.0 (clipped from -11.9)
 
-        # 5) 충돌/STUCK 벌점 제거 (벽 근처 패널티로 대체)
-        termination_penalty = torch.zeros(self.num_envs, device=self.device)
-
-        # 충돌 패널티 제거 - 벽 근처 연속 패널티만 사용
-        # apply_penalty = (self.collision_terminated | self.stuck_terminated) & ~in_grace_period
-        # termination_penalty[apply_penalty] = 0  # 충돌 패널티 제거
-
-        # 총 보상
-        reward = reward_forward + reward_survival + reward_speed + danger_penalty + termination_penalty
+        # 총 보상 (termination_penalty 제거됨 - danger_penalty로 충분)
+        reward = reward_forward + reward_survival + reward_speed + danger_penalty
 
         # 에피소드 통계 누적
         self.episode_reward_sum += reward
@@ -561,7 +557,6 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_speed_sum += reward_speed
         self.episode_reward_survival_sum += reward_survival
         self.episode_danger_penalty_sum += danger_penalty
-        self.episode_termination_penalty_sum += termination_penalty
 
         # 바퀴 속도 로깅 제거됨
 
@@ -615,7 +610,6 @@ class F1TenthEnv(DirectRLEnv):
                 total_speed_reward = self.episode_reward_speed_sum[idx].item()
                 total_survival_reward = self.episode_reward_survival_sum[idx].item()
                 total_danger_penalty = self.episode_danger_penalty_sum[idx].item()
-                total_penalty = self.episode_termination_penalty_sum[idx].item()
 
                 # 요약 로그 출력
                 print(f"\n[EPISODE END] Env {idx.item()} | {reason} | Steps: {ep_len}")
@@ -695,7 +689,6 @@ class F1TenthEnv(DirectRLEnv):
         self.episode_reward_speed_sum[env_ids] = 0.0
         self.episode_reward_survival_sum[env_ids] = 0.0
         self.episode_danger_penalty_sum[env_ids] = 0.0
-        self.episode_termination_penalty_sum[env_ids] = 0.0
 
         # LiDAR 센서 데이터 초기화
         if self.lidar_distances is not None:

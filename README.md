@@ -42,7 +42,7 @@ docker-compose.yaml 파일을 보면 다음과 같이 bind 마운트가 설정�
 ### 관측 공간 (Observation):
 - LiDAR 센서: 1080개 ray (270도 스캔, 0.25도 해상도)
 - 차량 상태: 속도(speed) + 조향각(steering)
-- 총 차원: 1082차원 (1080 + 2)
+- 총 차원: 1080차원 (1080 + 2)
 ### 행동 공간 (Action):
 - 조향 속도 (steering velocity): [-3.2, 3.2] rad/s
 - 가속도 (acceleration): [-9.51, 9.51] m/s²

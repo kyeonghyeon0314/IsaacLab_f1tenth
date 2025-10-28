@@ -1,15 +1,15 @@
-# SAC configuration for F1TENTH racing
-# Based on SKRL SAC implementation
+# F1TENTH 레이싱을 위한 SAC 설정
+# SKRL의 SAC 구현 기반
 # https://skrl.readthedocs.io/en/latest/api/agents/sac.html
 
 seed: 42
 
-# Models are instantiated using skrl's model instantiator utility
+# skrl의 모델 인스턴시에이터 유틸리티를 사용하여 모델 인스턴스 생성
 # https://skrl.readthedocs.io/en/latest/api/utils/model_instantiators.html
 models:
-  separate: True  # SAC requires separate models (policy, critic_1, critic_2)
+  separate: True  # SAC는 별도의 모델(정책, 크리틱_1, 크리틱_2)이 필요합니다
 
-  policy:  # Actor network
+  policy:  # 액터(행동) 네트워크
     # 파이썬 클래스의 전체 경로를 지정합니다.
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPPolicy
     clip_actions: True
@@ -18,111 +18,112 @@ models:
     max_log_std: 2.0
     initial_log_std: 0.0
     
-  critic_1:  # First Q-network
+  critic_1:  # 첫 번째 Q-네트워크
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPCritic
     clip_actions: False
   
-  critic_2:  # Second Q-network (for double Q-learning)
+  critic_2:  # 두 번째 Q-네트워크 (이중 Q-러닝용)
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPCritic
     clip_actions: False
 
-  target_critic_1:  # Target network for critic_1 (Polyak averaging)
+  target_critic_1:  # 크리틱_1을 위한 타겟 네트워크 (Polyak 평균화)
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPCritic
     clip_actions: False
 
-  target_critic_2:  # Target network for critic_2 (Polyak averaging)
+  target_critic_2:  # 크리틱_2를 위한 타겟 네트워크 (Polyak 평균화)
     class: isaaclab_tasks.direct.f1tenth.models.cnn_mlp_policy.CNNMLPCritic
     clip_actions: False
 
-# SAC agent configuration
+# SAC 에이전트 설정
 # https://skrl.readthedocs.io/en/latest/api/agents/sac.html
 agent:
   class: SAC
 
-  # Experiment configuration
+  # 실험 설정
   experiment:
     directory: f1tenth_sac
     experiment_name: ""
     write_interval: 1000
     checkpoint_interval: 5000
 
-  # SAC-specific: gradient steps per environment interaction
-  gradient_steps: 1  # Number of gradient updates per step (SAC default)
+  # SAC 전용: 환경 상호작용 당 그래디언트 스텝 수
+  gradient_steps: 1  # 스텝 당 그래디언트 업데이트 횟수 (SAC 기본값)
 
-  # Memory/rollouts: SAC doesn't use rollouts but skrl Runner requires it for memory_size calculation
-  # This is a workaround for skrl's internal memory allocation
-  rollouts: 1  # Dummy value (SAC uses replay buffer instead)
+  # 메모리/롤아웃: SAC는 롤아웃을 사용하지 않지만, skrl Runner가 memory_size 계산을 위해 이 값을 요구합니다
+  # 이는 skrl의 내부 메모리 할당을 위한 임시 해결책입니다
+  rollouts: 1  # 임시 값 (SAC는 리플레이 버퍼를 사용합니다)
 
-  # Discount factor for future rewards
+  # 미래 보상에 대한 할인 계수
   discount_factor: 0.99
 
-  # Polyak averaging factor for target networks
+  # 타겟 네트워크를 위한 Polyak 평균화 계수
   polyak: 0.005
 
-  # Learning rates (SAC typically uses fixed learning rate)
-  learning_rate: 1.0e-4
+  # 학습률 (SAC는 일반적으로 고정 학습률을 사용)
+  learning_rate: 3.0e-4
   learning_rate_critic: 5.0e-4 
-  learning_rate_scheduler: null  # SAC doesn't need PPO's KLAdaptiveLR
+  learning_rate_scheduler: null  # SAC는 PPO의 KLAdaptiveLR가 필요 없습니다
   learning_rate_scheduler_kwargs: {}
 
-  # State preprocessing
+  # 상태 전처리
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs:
-    size: 1082  # LiDAR(1080) + vehicle_state(2: speed + steering)
+    size: 1080  # LiDAR(1080)만 사용 - 단순화를 위해 차량 상태 제거
     epsilon: 1.0e-8
 
-  # Reward scaling
+  # 보상 스케일링 (Q-value 정규화로 학습 안정성 향상)
   value_preprocessor: RunningStandardScaler
-  value_preprocessor_kwargs: null
+  value_preprocessor_kwargs:
+    size: 1           # Q-value는 스칼라
+    epsilon: 1.0e-8   # 수치 안정성
 
-  # Random timesteps for exploration
-  random_timesteps: 80  # 80에서 100으로 증가
+  # 탐험을 위한 무작위 타임스텝
+  random_timesteps: 5000  # 초기 탐험 부족으로 편향된 학습, 지역 최적해에 조기 수렴 방지
 
-  # Learning starts after this many steps
-  learning_starts: 100
+  # 이 스텝 수 이후에 학습 시작
+  learning_starts: 5000
 
-  # Gradient steps per update
+  # 그래디언트 노름 클리핑
   grad_norm_clip: 10
 
-  # Batch size for training (scale with num_envs)
-  # num_envs=32 → 256 (VRAM 8GB 최적화)
-  batch_size: 512
-
-  # Entropy regularization
+  # 엔트로피 정규화
   learn_entropy: True
   entropy_learning_rate: 3.0e-4
   initial_entropy_value: 0.5 # 0.2에서 0.5로 증가 (더 많은 탐험)
-  target_entropy: -0.5  # Auto-tune 대신 고정값 사용 (2D 행동 공간에서 -1.0)
+  target_entropy: -2.0  # 탐험 부족, 정책이 너무 결정론적으로 수렴 방지
 
-  # Rewards shaping
+  # 보상 설계
   rewards_shaper: null
 
 
-# Replay buffer for SAC
-memory:
+# SAC를 위한 리플레이 버퍼
+replay_buffer:
   class: RandomMemory
   memory_size: 100000    # 3000 x 32 envs = 96K transitions (VRAM 8GB 최적화)
+  # 학습을 위한 배치 크기 (num_envs에 따라 조절)
+  # num_envs=32 → 256 (VRAM 8GB 최적화)
+  batch_size: 512
 
 
-# Training configuration
+# 학습 설정
 trainer:
   class: SequentialTrainer
 
-  timesteps: 500000  # Total training timesteps
+  timesteps: 500000  # 총 학습 타임스텝
 
-  environment_info: log  # Log environment info
+  environment_info: log  # 환경 정보 로그
 
-  # Checkpoint settings
-  write_interval: 500  # Save every 500 timesteps
-  checkpoint_interval: 5000  # Checkpoint every 10000 timesteps
+  # 체크포인트 설정
+  write_interval: 500  # 500 타임스텝마다 저장
+  checkpoint_interval: 5000  # 5000 타임스텝마다 체크포인트 저장
 
-  # TensorBoard logging
+  # TensorBoard 로깅
   wandb: True
   wandb_kwargs: {}
 
-# Evaluation (optional)
-eval_interval: 5000  # Evaluate every 5000 steps
+# 평가 (선택 사항)
+eval_interval: 5000  # 5000 스텝마다 평가
 eval_episodes: 10
 
-# Hardware
-device: cuda:0  # Changed from cuda:0 to use GPU 3
+# 하드웨어
+device: cuda:0  # cuda:0에서 GPU 3을 사용하도록 변경

@@ -227,11 +227,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             from skrl.resources.preprocessors.torch import RunningStandardScaler
             from isaaclab_tasks.direct.f1tenth.models import CNNMLPPolicy, CNNMLPCritic
 
-            print("[INFO] Training CNN+MLP hybrid model for F1TENTH (TinyLidarNet architecture)")
-            print("       - LiDAR: 1080 → 1D CNN → 128 features")
-            print("       - Policy MLP: 130 → 128 → 128 → 64 → 2")
-            print("       - Critic MLP: 132 → 256 → 256 → 128 → 1")
-
             # Create custom models directly
             device = env.device
             models = {}
@@ -259,7 +254,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
             # Create memory
             memory = RandomMemory(
-                memory_size=agent_cfg["memory"]["memory_size"],
+                memory_size=agent_cfg["replay_buffer"]["memory_size"],
                 num_envs=env.num_envs,
                 device=device
             )
@@ -267,8 +262,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # Create SAC agent with custom models
             agent_cfg_sac = SAC_DEFAULT_CONFIG.copy()
             agent_cfg_sac.update(agent_cfg["agent"])
+            agent_cfg_sac["batch_size"] = agent_cfg["replay_buffer"]["batch_size"]
+
+            # State preprocessor (normalizes observations)
             agent_cfg_sac["state_preprocessor"] = RunningStandardScaler
             agent_cfg_sac["state_preprocessor_kwargs"] = agent_cfg["agent"]["state_preprocessor_kwargs"]
+
+            # Value preprocessor (normalizes Q-values for training stability)
+            if "value_preprocessor" in agent_cfg["agent"] and agent_cfg["agent"]["value_preprocessor"]:
+                agent_cfg_sac["value_preprocessor"] = RunningStandardScaler
+                agent_cfg_sac["value_preprocessor_kwargs"] = agent_cfg["agent"].get("value_preprocessor_kwargs", None)
 
             agent = SAC(
                 models=models,
@@ -278,6 +281,42 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 action_space=env.action_space,
                 device=device
             )
+
+            # ===== Print actual model architecture =====
+            def get_mlp_architecture(mlp_module):
+                """Extract MLP layer dimensions from Sequential module."""
+                dims = []
+                for layer in mlp_module:
+                    if isinstance(layer, torch.nn.Linear):
+                        if not dims:
+                            dims.append(layer.in_features)
+                        dims.append(layer.out_features)
+                return dims
+
+            # Get CNN output size
+            cnn_output_size = agent.policy.lidar_extractor.output_size if hasattr(agent.policy.lidar_extractor, 'output_size') else 64
+
+            # Get Policy MLP architecture
+            policy_mlp_dims = get_mlp_architecture(agent.policy.mlp)
+            policy_arch = " → ".join(map(str, policy_mlp_dims))
+
+            # Get Critic MLP architecture
+            critic_mlp_dims = get_mlp_architecture(agent.critic_1.mlp)
+            critic_arch = " → ".join(map(str, critic_mlp_dims))
+
+            # Check if Policy has Tanh at the end
+            has_tanh = any(isinstance(layer, torch.nn.Tanh) for layer in agent.policy.mlp)
+            tanh_note = " (with Tanh)" if has_tanh else " (no Tanh)"
+
+            print("[INFO] Training CNN+MLP hybrid model for F1TENTH")
+            print(f"       - LiDAR: 1080 → CNN + GAP → {cnn_output_size} features")
+            print(f"       - Policy MLP: {policy_arch}{tanh_note}")
+            print(f"       - Critic MLP: {critic_arch}")
+
+            # Print preprocessor info
+            state_prep = agent._state_preprocessor is not None
+            value_prep = agent._value_preprocessor is not None
+            print(f"[INFO] Preprocessors: State={state_prep}, Value={value_prep}")
 
             # ===== Optimizer setup: CNN + MLP 동시 학습 =====
             import torch
@@ -289,10 +328,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             policy_cnn_params = list(agent.policy.lidar_extractor.parameters())
             policy_mlp_params = list(agent.policy.mlp.parameters()) + [agent.policy.log_std_parameter]
 
-            # 학습률 설정
+            # 학습률 설정 (YAML에서 읽어오기)
+            policy_lr = agent_cfg["agent"]["learning_rate"]
+            critic_lr = agent_cfg["agent"]["learning_rate_critic"]
+
             agent.policy_optimizer = optim.Adam([
-                {'params': policy_cnn_params, 'lr': 1.0e-4},   # CNN
-                {'params': policy_mlp_params, 'lr': 1.0e-4}    # MLP
+                {'params': policy_cnn_params, 'lr': policy_lr},   # CNN
+                {'params': policy_mlp_params, 'lr': policy_lr}    # MLP
             ])
 
             # Critic도 동일
@@ -304,12 +346,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 critic_mlp_params.extend(list(critic.mlp.parameters()))
 
             agent.critic_optimizer = optim.Adam([
-                {'params': critic_cnn_params, 'lr': 5.0e-4},   # CNN
-                {'params': critic_mlp_params, 'lr': 5.0e-4}    # MLP
+                {'params': critic_cnn_params, 'lr': critic_lr},   # CNN
+                {'params': critic_mlp_params, 'lr': critic_lr}    # MLP
             ])
 
-            print(f"  Policy: CNN=1.0e-4, MLP=1.0e-4")
-            print(f"  Critic: CNN=5.0e-4, MLP=5.0e-4")
+            print(f"  Policy: CNN={policy_lr:.1e}, MLP={policy_lr:.1e} (from YAML)")
+            print(f"  Critic: CNN={critic_lr:.1e}, MLP={critic_lr:.1e} (from YAML)")
 
             # Create trainer
             trainer_cfg = agent_cfg["trainer"].copy()

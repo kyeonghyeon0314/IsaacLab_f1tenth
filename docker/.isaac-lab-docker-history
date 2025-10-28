@@ -231,3 +231,4 @@ find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf
 rm -rf logs/
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1
+nvidia-smi
