@@ -10,9 +10,9 @@ Based on TinyLidarNet architecture:
 https://arxiv.org/html/2410.07447v1
 
 Architecture:
-    LiDAR (1080) → 1D CNN → compressed features (64)
+    LiDAR (1080) → 1D CNN → compressed features (128)
     Vehicle state (2) → pass through
-    Concat (66) → MLP → actions/Q-values
+    Concat (130) → MLP → actions/Q-values
 """
 
 import torch
@@ -20,68 +20,9 @@ import torch.nn as nn
 from skrl.models.torch import Model, GaussianMixin, DeterministicMixin
 
 
-class AngleBasedFeatureExtractor(nn.Module):
-    """
-    Angle-based LiDAR feature extraction (Stage 1: No CNN).
-
-    Compresses 1080-dimensional LiDAR scan into 128-dimensional feature vector
-    by grouping rays into angular bins and extracting min distance per bin.
-
-    Architecture:
-        LiDAR(1080) → Angular Binning (128 bins) → Min Pooling → Features(128)
-
-    LiDAR specs:
-        - 1080 rays covering ±135° (270° total)
-        - Each ray: 0.25° apart
-        - Ray 0: -135°, Ray 540: 0° (forward), Ray 1079: +135°
-    """
-
-    def __init__(self, input_size: int = 1080, output_size: int = 128):
-        super().__init__()
-
-        self.input_size = input_size
-        self.output_size = output_size
-
-        # 각 bin의 크기 (레이 개수)
-        # 1080 / 128 = 8.4 → 각 bin은 약 8~9개 레이
-        self.bin_size = input_size // output_size
-
-        # 남은 레이 처리
-        self.remainder = input_size % output_size
-
-    def forward(self, lidar: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            lidar: (batch_size, 1080) LiDAR scan
-
-        Returns:
-            features: (batch_size, 128) angular features
-        """
-        batch_size = lidar.shape[0]
-        features = []
-
-        start_idx = 0
-        for i in range(self.output_size):
-            # 각 bin의 크기 결정 (남은 레이를 앞쪽 bin들에 분배)
-            current_bin_size = self.bin_size + (1 if i < self.remainder else 0)
-            end_idx = start_idx + current_bin_size
-
-            # 해당 각도 구간의 최소 거리 추출 (가장 가까운 장애물)
-            bin_rays = lidar[:, start_idx:end_idx]
-            min_distance = torch.min(bin_rays, dim=1, keepdim=True).values
-            features.append(min_distance)
-
-            start_idx = end_idx
-
-        # (batch, 128, 1) → (batch, 128)
-        features = torch.cat(features, dim=1)
-
-        return features
-
-
 class LidarFeatureExtractor(nn.Module):
     """
-    1D CNN for LiDAR feature extraction (Stage 2: With CNN).
+    1D CNN for LiDAR feature extraction.
 
     Compresses 1080-dimensional LiDAR scan into 128-dimensional feature vector
     by learning spatial patterns (walls, corners, obstacles).
@@ -151,44 +92,33 @@ class CNNMLPPolicy(GaussianMixin, Model):
 
     Input:
         - LiDAR scan (1080)
-        - Vehicle state (2): forward_speed, steering
 
     Output:
         - Actions (2): steering_velocity, target_velocity
 
     Architecture:
-        LiDAR (1080) → CNN → features (128)
-        Vehicle state (2) → pass through
-        Concat (130) → MLP (130→128→128→2) → actions
+        LiDAR (1080) → CNN → features (128) → MLP (128→128→128→64→2) → actions
     """
 
     def __init__(self, observation_space, action_space, device,
                  clip_actions=False, clip_log_std=True,
                  min_log_std=-20, max_log_std=2,
-                 reduction="sum", initial_log_std=0,
-                 use_angle_based=False):
+                 reduction="sum", initial_log_std=0):
         Model.__init__(self, observation_space, action_space, device)
         GaussianMixin.__init__(self, clip_actions, clip_log_std,
                               min_log_std, max_log_std, reduction)
 
-        # LiDAR feature extractor (선택 가능)
-        if use_angle_based:
-            print("[INFO] Policy: Using AngleBasedFeatureExtractor (Stage 1)")
-            self.lidar_extractor = AngleBasedFeatureExtractor(
-                input_size=1080,
-                output_size=128
-            )
-        else:
-            print("[INFO] Policy: Using CNN LidarFeatureExtractor (Stage 2)")
-            self.lidar_extractor = LidarFeatureExtractor(
-                input_size=1080,
-                output_size=128
-            )
+        # LiDAR feature extractor
+        print("[INFO] Policy: Using CNN LidarFeatureExtractor")
+        self.lidar_extractor = LidarFeatureExtractor(
+            input_size=1080,
+            output_size=128
+        )
 
-        # MLP: processes concatenated features (128 + 2 = 130)
-        # Architecture: 130 → 128 → 128 → 64 → 2
+        # MLP: processes CNN features (128)
+        # Architecture: 128 → 128 → 128 → 64 → 2
         self.mlp = nn.Sequential(
-            nn.Linear(130, 128),
+            nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
@@ -209,7 +139,7 @@ class CNNMLPPolicy(GaussianMixin, Model):
         Forward pass.
 
         Args:
-            inputs: dict with key "states" containing observations (batch, 1082)
+            inputs: dict with key "states" containing observations (batch, 1080)
             role: unused (for skrl compatibility)
 
         Returns:
@@ -219,18 +149,14 @@ class CNNMLPPolicy(GaussianMixin, Model):
         """
         states = inputs["states"]
 
-        # Split input into LiDAR and vehicle state
-        lidar = states[:, :1080]           # (batch, 1080)
-        vehicle_state = states[:, 1080:]   # (batch, 2)
+        # LiDAR input (1080)
+        lidar = states  # (batch, 1080)
 
         # Extract LiDAR features
         lidar_features = self.lidar_extractor(lidar)  # (batch, 128)
 
-        # Concatenate features
-        features = torch.cat([lidar_features, vehicle_state], dim=1)  # (batch, 130)
-
         # Pass through MLP
-        mean = self.mlp(features)  # (batch, 2)
+        mean = self.mlp(lidar_features)  # (batch, 2)
 
         return mean, self.log_std_parameter, {}
 
@@ -241,41 +167,33 @@ class CNNMLPCritic(DeterministicMixin, Model):
 
     Input:
         - LiDAR scan (1080)
-        - Vehicle state (2): forward_speed, steering
         - Actions (2): steering_velocity, target_velocity
 
     Output:
         - Q-value (1): estimated return
 
     Architecture:
-        LiDAR (1080) → CNN → features (64)
-        Vehicle state (2) + Actions (2) → concat (4)
-        Concat all (68) → MLP (68→256→128→64→1) → Q-value
+        LiDAR (1080) → CNN → features (128)
+        Actions (2) → concat
+        Concat all (130) → MLP (130→256→256→128→64→1) → Q-value
     """
 
     def __init__(self, observation_space, action_space, device,
-                 clip_actions=False, use_angle_based=False):
+                 clip_actions=False):
         Model.__init__(self, observation_space, action_space, device)
         DeterministicMixin.__init__(self, clip_actions)
 
-        # LiDAR feature extractor (선택 가능)
-        if use_angle_based:
-            print("[INFO] Critic: Using AngleBasedFeatureExtractor (Stage 1)")
-            self.lidar_extractor = AngleBasedFeatureExtractor(
-                input_size=1080,
-                output_size=128
-            )
-        else:
-            print("[INFO] Critic: Using CNN LidarFeatureExtractor (Stage 2)")
-            self.lidar_extractor = LidarFeatureExtractor(
-                input_size=1080,
-                output_size=128
-            )
+        # LiDAR feature extractor
+        print("[INFO] Critic: Using CNN LidarFeatureExtractor")
+        self.lidar_extractor = LidarFeatureExtractor(
+            input_size=1080,
+            output_size=128
+        )
 
-        # MLP: processes concatenated features (128 + 2 + 2 = 132)
-        # Architecture: 132 → 256 → 128 → 64 → 1 (matches YAML config)
+        # MLP: processes concatenated features (128 + 2 = 130)
+        # Architecture: 130 → 256 → 256 → 128 → 64 → 1 (matches YAML config)
         self.mlp = nn.Sequential(
-            nn.Linear(132, 256),
+            nn.Linear(130, 256),
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
@@ -292,7 +210,7 @@ class CNNMLPCritic(DeterministicMixin, Model):
 
         Args:
             inputs: dict with keys:
-                - "states": observations (batch, 1082)
+                - "states": observations (batch, 1080)
                 - "taken_actions": actions (batch, 2)
             role: unused (for skrl compatibility)
 
@@ -303,15 +221,14 @@ class CNNMLPCritic(DeterministicMixin, Model):
         states = inputs["states"]
         actions = inputs["taken_actions"]
 
-        # Split states into LiDAR and vehicle state
-        lidar = states[:, :1080]           # (batch, 1080)
-        vehicle_state = states[:, 1080:]   # (batch, 2)
+        # LiDAR input (1080)
+        lidar = states  # (batch, 1080)
 
         # Extract LiDAR features
-        lidar_features = self.lidar_extractor(lidar)  # (batch, 64)
+        lidar_features = self.lidar_extractor(lidar)  # (batch, 128)
 
-        # Concatenate all features
-        features = torch.cat([lidar_features, vehicle_state, actions], dim=1)  # (batch, 68)
+        # Concatenate LiDAR features with actions
+        features = torch.cat([lidar_features, actions], dim=1)  # (batch, 130)
 
         # Pass through MLP
         q_value = self.mlp(features)  # (batch, 1)

@@ -221,3 +221,13 @@ rm -rf logs/
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_0-06-20-34_sac_torch/checkpoints/agent_best.pt --stage 1
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_0-06-20-34_sac_torch/checkpoints/best_agent.pt --stage 1
 ./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8 --checkpoint logs/skrl/f1tenth_sac/2025-10-27_06-20-34_sac_torch/checkpoints/best_agent.pt --stage 1
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --checkpoint /workspace/isaaclab/source/best_agent.pt  --stage 1 --video --real-time
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --checkpoint /workspace/isaaclab/source/best_agent.pt  --stage 1 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --checkpoint /workspace/isaaclab/source/beage.p_15000t  --stage 1 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --checkpoint /workspace/isaaclab/source/agent_15000.pt  --stage 1 
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 --
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/play.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1 
+find . -type d -name "__pycache__" -print0 | xargs -0 rm -rf 
+rm -rf logs/
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 8
+./isaaclab.sh -p scripts/reinforcement_learning/skrl/train.py --task Isaac-F1tenth-Direct-v0 --algorithm SAC --device cuda:0 --num_envs 1

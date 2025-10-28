@@ -78,8 +78,8 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
     # action[:, 1]: 목표 선속도 [-1, 1] → [v_min, v_max] m/s (직접 속도 제어)
     action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)   # SAC 맞춤 설정
 
-    # 관찰 공간 (LiDAR + 차량 상태)
-    observation_space = 1080 + 2  # LiDAR(1080) + forward_speed(1, 방향포함) + 조향(1)
+    # 관찰 공간 (LiDAR만 사용)
+    observation_space = 1080  # LiDAR(1080)
     state_space = 0
 
     # 차량 파라미터
@@ -104,7 +104,7 @@ class F1TenthEnvCfg(DirectRLEnvCfg):
         "x_range": (0, 0),           # X축 스폰 범위 [최소, 최대]
         "y_range": (-0.67, -0.65),           # Y축 스폰 범위 [최소, 최대]
         "z_fixed": -0.5,                   # 고정 Z 높이 (충돌 방지)
-        "yaw_range": (-math.pi /8, 0), # Yaw 방향 범위 [최소, 최대]
+        "yaw_range": (0, 0), # Yaw 방향 범위 [최소, 최대]
     }
 
     # 트랙 중심선 waypoints (X, Y 좌표)
@@ -258,28 +258,8 @@ class F1TenthEnv(DirectRLEnv):
         # 보상 계산을 위해 LiDAR 거리 저장
         self.lidar_distances = lidar_distances
 
-        root_state = self.robot.data.root_state_w
-        pos, vel, _ = root_state[:, :3], root_state[:, 7:10], root_state[:, 10:13]
-        joint_pos = self.robot.data.joint_pos
-        if len(self._steering_joint_ids) > 0 and self._steering_joint_ids[0] < joint_pos.shape[1]:
-            steering_angle = joint_pos[:, self._steering_joint_ids[0]]
-        else:
-            steering_angle = torch.zeros(joint_pos.shape[0], device=self.device)
-
-        # 전진 방향 속도 계산 (트랙 중심선 기준, 양수=전진, 음수=후진)
-        # 현재 segment 방향으로 속도 투영 (선분 투영 방식과 일관성 유지)
-        # Note: _get_track_progress()가 먼저 호출되어야 current_waypoint_idx가 업데이트됨
-        # 관찰에서는 이전 스텝의 segment 방향을 사용 (문제 없음)
-        forward_direction = self._get_centerline_direction()  # (num_envs, 2)
-
-        vel_xy = vel[:, :2]  # XY 평면 속도
-        forward_speed = torch.sum(vel_xy * forward_direction, dim=-1, keepdim=True)  # 전진 속도 투영
-
-        vehicle_state = torch.cat([
-            forward_speed,                 # 1 차원 (방향 포함: +전진, -후진)
-            steering_angle.unsqueeze(-1)   # 1 차원
-        ], dim=-1)  # 총: 2 차원
-        obs = torch.cat([lidar_distances, vehicle_state], dim=-1)
+        # LiDAR 데이터만 반환 (차량 상태 제외)
+        obs = lidar_distances
         return {"policy": obs}
 
     def _detect_collision_consecutive(
@@ -528,40 +508,40 @@ class F1TenthEnv(DirectRLEnv):
         forward_speed_raw = torch.sum(vel_xy * forward_direction, dim=-1)
         reward_speed = torch.clamp(forward_speed_raw / 5.0, 0.0, 1.0) * 1.2
 
-        # 3) 저속 페널티 (3단계 구조)
-        # 빠른 주행을 유도하기 위한 속도별 차등 패널티
-        # - 0-1m/s: -2.0/step (매우 느림)
-        # - 1-2m/s: -0.5/step (느림)
-        # - 2m/s 이상: 패널티 없음
-        reward_survival = torch.zeros(self.num_envs, device=self.device)
+        # 3) 저속 페널티 (연속형 - Inverse 함수)
+        # 속도가 0에 가까워질수록 페널티가 급증
+        # 공식: -A / (speed/target) + A  (target 속도에서 0)
+        TARGET_SPEED_FOR_PENALTY = 1.0  # 1.0 m/s
+        PENALTY_SCALE_SLOW = 2.0
+        MIN_SPEED_RATIO = 0.05  # 역수 폭발 방지
 
-        # 매우 느림: 0-1m/s
-        Too_very_slow_mask = forward_speed_raw < 0.3
-        reward_survival[Too_very_slow_mask] = -1.0
+        speed_ratio = torch.clamp(forward_speed_raw / TARGET_SPEED_FOR_PENALTY, min=MIN_SPEED_RATIO, max=10.0)
+        reward_survival = -PENALTY_SCALE_SLOW / speed_ratio + PENALTY_SCALE_SLOW
+        # speed = 1.0 m/s → ratio=1.0 → penalty=0
+        # speed = 0.5 m/s → ratio=0.5 → penalty=-2.0
+        # speed = 0.1 m/s → ratio=0.1 → penalty=-18.0
+        # speed = 0.05 m/s → ratio=0.05 → penalty=-38.0
 
-        very_slow_mask = (forward_speed_raw >= 0.3) & (forward_speed_raw < 0.8)
-        reward_survival[very_slow_mask] = -0.5
-        # 느림: 1-2m/s
-        slow_mask = (forward_speed_raw >= 0.8) & (forward_speed_raw < 1.5)
-        reward_survival[slow_mask] = -0.2
-
-        # 빠름: 2m/s 이상 -> 패널티 없음 (0)
-
-        # 4) 연속적 위험 패널티 (2단계 구조)
-        # - 25cm 이내: -1.5점/step (경고)
-        # - 10cm 이내: -20점/step (위험)
+        # 4) 연속적 위험 패널티 (지수 함수)
+        # 벽에 가까워질수록 페널티가 지수적으로 증가
+        # 공식: -A * (exp(B * proximity) - 1)
         min_distance = torch.min(self.lidar_distances, dim=1).values
 
-        # 2단계 패널티 적용
-        danger_penalty = torch.zeros(self.num_envs, device=self.device)
+        WARNING_DISTANCE = 0.25  # 25cm부터 페널티 시작
+        PENALTY_SCALE_DANGER = 3.0
+        EXP_STEEPNESS_DANGER = 8.0
 
-        # 10cm 이내: 매우 위험 (-20점)
-        very_close_mask = min_distance < 0.1
-        danger_penalty[very_close_mask] = -20.0
+        # 근접도 계산 (0보다 작으면 0으로 clamp)
+        proximity = torch.clamp(WARNING_DISTANCE - min_distance, min=0.0)
 
-        # 25cm 이내 (10cm 제외): 경고 (-1.5점)
-        close_mask = (min_distance >= 0.1) & (min_distance < 0.25)
-        danger_penalty[close_mask] = -1.5
+        # 지수적 페널티 (proximity=0일 때 0, 가까워질수록 급증)
+        danger_penalty = -PENALTY_SCALE_DANGER * (
+            torch.exp(EXP_STEEPNESS_DANGER * proximity) - 1.0
+        )
+        # distance = 25cm → proximity=0.0 → penalty=0
+        # distance = 20cm → proximity=0.05 → penalty=-1.5
+        # distance = 10cm → proximity=0.15 → penalty=-7.0
+        # distance = 5cm → proximity=0.20 → penalty=-11.9
 
         # 5) 충돌/STUCK 벌점 제거 (벽 근처 패널티로 대체)
         termination_penalty = torch.zeros(self.num_envs, device=self.device)

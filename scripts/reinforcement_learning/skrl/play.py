@@ -53,7 +53,7 @@ parser.add_argument(
     "--algorithm",
     type=str,
     default="PPO",
-    choices=["AMP", "PPO", "IPPO", "MAPPO"],
+    choices=["AMP", "PPO", "IPPO", "MAPPO", "SAC"],
     help="The RL algorithm used for training the skrl agent.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
@@ -196,17 +196,78 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
 
-    # configure and instantiate the skrl runner
-    # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
-    experiment_cfg["trainer"]["close_environment_at_exit"] = False
-    experiment_cfg["agent"]["experiment"]["write_interval"] = 0  # don't log to TensorBoard
-    experiment_cfg["agent"]["experiment"]["checkpoint_interval"] = 0  # don't generate checkpoints
-    runner = Runner(env, experiment_cfg)
+    # SAC용 커스텀 모델 사용
+    if algorithm == "sac":
+        from skrl.agents.torch.sac import SAC, SAC_DEFAULT_CONFIG
+        from skrl.memories.torch import RandomMemory
+        from skrl.resources.preprocessors.torch import RunningStandardScaler
+        from isaaclab_tasks.direct.f1tenth.models import CNNMLPPolicy, CNNMLPCritic
 
-    print(f"[INFO] Loading model checkpoint from: {resume_path}")
-    runner.agent.load(resume_path)
-    # set agent to evaluation mode
-    runner.agent.set_running_mode("eval")
+        print("[INFO] Loading SAC model (CNN+MLP)")
+
+        device = env.device
+        models = {}
+
+        # Policy
+        models["policy"] = CNNMLPPolicy(
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            device=device,
+            clip_actions=experiment_cfg["models"]["policy"]["clip_actions"],
+            clip_log_std=experiment_cfg["models"]["policy"]["clip_log_std"],
+            min_log_std=experiment_cfg["models"]["policy"]["min_log_std"],
+            max_log_std=experiment_cfg["models"]["policy"]["max_log_std"],
+            initial_log_std=experiment_cfg["models"]["policy"]["initial_log_std"]
+        )
+
+        # Critics (필요하지만 play에서는 사용 안 함)
+        for critic_name in ["critic_1", "critic_2", "target_critic_1", "target_critic_2"]:
+            models[critic_name] = CNNMLPCritic(
+                observation_space=env.observation_space,
+                action_space=env.action_space,
+                device=device,
+                clip_actions=experiment_cfg["models"][critic_name]["clip_actions"]
+            )
+
+        # Create memory (필요하지만 play에서는 사용 안 함)
+        memory = RandomMemory(
+            memory_size=1000,  # play에서는 작게
+            num_envs=env.num_envs,
+            device=device
+        )
+
+        # Create SAC agent
+        agent_cfg_sac = SAC_DEFAULT_CONFIG.copy()
+        agent_cfg_sac.update(experiment_cfg["agent"])
+        agent_cfg_sac["state_preprocessor"] = RunningStandardScaler
+        agent_cfg_sac["state_preprocessor_kwargs"] = experiment_cfg["agent"]["state_preprocessor_kwargs"]
+
+        agent = SAC(
+            models=models,
+            memory=memory,
+            cfg=agent_cfg_sac,
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            device=device
+        )
+
+        # 체크포인트 로드
+        print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        agent.load(resume_path)
+        agent.set_running_mode("eval")
+
+        runner = None  # Runner 사용 안 함
+    else:
+        # 다른 알고리즘은 기존 Runner 사용
+        experiment_cfg["trainer"]["close_environment_at_exit"] = False
+        experiment_cfg["agent"]["experiment"]["write_interval"] = 0
+        experiment_cfg["agent"]["experiment"]["checkpoint_interval"] = 0
+        runner = Runner(env, experiment_cfg)
+
+        print(f"[INFO] Loading model checkpoint from: {resume_path}")
+        runner.agent.load(resume_path)
+        runner.agent.set_running_mode("eval")
+        agent = runner.agent
 
     # reset environment
     obs, _ = env.reset()
@@ -218,7 +279,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+            outputs = agent.act(obs, timestep=0, timesteps=0)
             # - multi-agent (deterministic) actions
             if hasattr(env, "possible_agents"):
                 actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}

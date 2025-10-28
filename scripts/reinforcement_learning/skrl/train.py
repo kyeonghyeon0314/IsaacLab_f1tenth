@@ -38,12 +38,6 @@ parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint to resume training.")
-parser.add_argument("--stage", type=int, default=3, choices=[1, 2, 3],
-                    help="Training stage: 1=Angle-based (MLP only), 2=CNN (MLP frozen), 3=CNN+MLP (fine-tuning, default: 3)")
-parser.add_argument("--mlp_checkpoint", type=str, default=None,
-                    help="Path to Stage 1 checkpoint to load MLP weights for Stage 2/3")
-parser.add_argument("--cnn_checkpoint", type=str, default=None,
-                    help="Path to Stage 2 checkpoint to load CNN weights for Stage 3")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
 parser.add_argument(
@@ -233,22 +227,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             from skrl.resources.preprocessors.torch import RunningStandardScaler
             from isaaclab_tasks.direct.f1tenth.models import CNNMLPPolicy, CNNMLPCritic
 
-            # Stage 선택
-            use_angle_based = (args_cli.stage == 1)
-
-            if args_cli.stage == 1:
-                stage_name = "Stage 1 (Angle-based + MLP)"
-            elif args_cli.stage == 2:
-                stage_name = "Stage 2 (CNN only, MLP frozen)"
-            else:
-                stage_name = "Stage 3 (CNN + MLP fine-tuning)"
-
-            print(f"[INFO] Training {stage_name}")
-            print("[INFO] Using CNN+MLP hybrid models for F1TENTH (TinyLidarNet architecture)")
-            if use_angle_based:
-                print("       - LiDAR: 1080 → Angle Binning (128 bins) → Min Pooling → 128 features")
-            else:
-                print("       - LiDAR: 1080 → 1D CNN → 128 features")
+            print("[INFO] Training CNN+MLP hybrid model for F1TENTH (TinyLidarNet architecture)")
+            print("       - LiDAR: 1080 → 1D CNN → 128 features")
             print("       - Policy MLP: 130 → 128 → 128 → 64 → 2")
             print("       - Critic MLP: 132 → 256 → 256 → 128 → 1")
 
@@ -265,8 +245,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 clip_log_std=agent_cfg["models"]["policy"]["clip_log_std"],
                 min_log_std=agent_cfg["models"]["policy"]["min_log_std"],
                 max_log_std=agent_cfg["models"]["policy"]["max_log_std"],
-                initial_log_std=agent_cfg["models"]["policy"]["initial_log_std"],
-                use_angle_based=use_angle_based
+                initial_log_std=agent_cfg["models"]["policy"]["initial_log_std"]
             )
 
             # Critics
@@ -275,8 +254,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     observation_space=env.observation_space,
                     action_space=env.action_space,
                     device=device,
-                    clip_actions=agent_cfg["models"][critic_name]["clip_actions"],
-                    use_angle_based=use_angle_based
+                    clip_actions=agent_cfg["models"][critic_name]["clip_actions"]
                 )
 
             # Create memory
@@ -301,209 +279,37 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 device=device
             )
 
-            # ===== Stage 2/3: 가중치 로드 =====
+            # ===== Optimizer setup: CNN + MLP 동시 학습 =====
             import torch
-
-            if not use_angle_based and args_cli.mlp_checkpoint:
-                print(f"[INFO] Loading MLP weights from Stage 1 checkpoint")
-                print(f"       Checkpoint: {args_cli.mlp_checkpoint}")
-
-                stage1_checkpoint = torch.load(args_cli.mlp_checkpoint, map_location=device)
-
-                # Policy MLP 로드
-                agent.policy.mlp.load_state_dict({k.replace('mlp.', ''): v for k, v in stage1_checkpoint['policy'].items() if 'mlp.' in k}, strict=False)
-                agent.policy.log_std_parameter.data = stage1_checkpoint['policy']['log_std_parameter']
-
-                # Critic MLP 로드
-                for critic_name in ["critic_1", "critic_2"]:
-                    if critic_name in stage1_checkpoint:
-                        critic = getattr(agent, critic_name)
-                        critic.mlp.load_state_dict({k.replace('mlp.', ''): v for k, v in stage1_checkpoint[critic_name].items()}, strict=False)
-
-                print("[INFO] MLP weights loaded successfully")
-
-            if args_cli.stage == 3 and args_cli.cnn_checkpoint:
-                print(f"[INFO] Stage 3: Loading CNN weights from Stage 2 checkpoint")
-                print(f"       Checkpoint: {args_cli.cnn_checkpoint}")
-
-                stage2_checkpoint = torch.load(args_cli.cnn_checkpoint, map_location=device)
-
-                # Policy CNN 로드
-                agent.policy.lidar_extractor.load_state_dict(
-                    {k.replace('lidar_extractor.', ''): v for k, v in stage2_checkpoint['policy'].items() if 'lidar_extractor.' in k},
-                    strict=False
-                )
-
-                # Critic CNN 로드
-                for critic_name in ["critic_1", "critic_2"]:
-                    if critic_name in stage2_checkpoint:
-                        critic = getattr(agent, critic_name)
-                        critic.lidar_extractor.load_state_dict(
-                            {k.replace('lidar_extractor.', ''): v for k, v in stage2_checkpoint[critic_name].items() if 'lidar_extractor.' in k},
-                            strict=False
-                        )
-
-                print("[INFO] CNN weights loaded successfully")
-
-            # ===== Stage별 학습률 설정 =====
             import torch.optim as optim
 
-            if args_cli.stage == 1:
-                # ===== Stage 1: MLP만 학습 (Angle-based feature) =====
-                print("[INFO] Stage 1: Training MLP only (angle-based features)")
+            print("[INFO] Training CNN + MLP together")
 
-                # Feature extractor는 파라미터 없음 (순수 연산)
-                # MLP만 학습
-                policy_mlp_params = list(agent.policy.mlp.parameters()) + [agent.policy.log_std_parameter]
-                agent.policy_optimizer = optim.Adam(policy_mlp_params, lr=1.0e-4)
+            # CNN과 MLP 모두 학습
+            policy_cnn_params = list(agent.policy.lidar_extractor.parameters())
+            policy_mlp_params = list(agent.policy.mlp.parameters()) + [agent.policy.log_std_parameter]
 
-                critic_mlp_params = []
-                for critic_name in ["critic_1", "critic_2"]:
-                    critic = getattr(agent, critic_name)
-                    critic_mlp_params.extend(list(critic.mlp.parameters()))
+            # 학습률 설정
+            agent.policy_optimizer = optim.Adam([
+                {'params': policy_cnn_params, 'lr': 1.0e-4},   # CNN
+                {'params': policy_mlp_params, 'lr': 1.0e-4}    # MLP
+            ])
 
-                agent.critic_optimizer = optim.Adam(critic_mlp_params, lr=5.0e-4)
+            # Critic도 동일
+            critic_cnn_params = []
+            critic_mlp_params = []
+            for critic_name in ["critic_1", "critic_2"]:
+                critic = getattr(agent, critic_name)
+                critic_cnn_params.extend(list(critic.lidar_extractor.parameters()))
+                critic_mlp_params.extend(list(critic.mlp.parameters()))
 
-                print(f"  Policy MLP: lr=1.0e-4 (fixed)")
-                print(f"  Critic MLP: lr=5.0e-4 (fixed)")
+            agent.critic_optimizer = optim.Adam([
+                {'params': critic_cnn_params, 'lr': 5.0e-4},   # CNN
+                {'params': critic_mlp_params, 'lr': 5.0e-4}    # MLP
+            ])
 
-            elif args_cli.stage == 2:
-                # ===== Stage 2: CNN 학습 + MLP freeze =====
-                print("[INFO] Stage 2: Training CNN (MLP frozen)")
-
-                # CNN 파라미터만 학습 (MLP는 freeze)
-                policy_cnn_params = list(agent.policy.lidar_extractor.parameters())
-
-                # MLP freeze (학습률 0)
-                for param in agent.policy.mlp.parameters():
-                    param.requires_grad = False
-                agent.policy.log_std_parameter.requires_grad = False
-
-                # Policy: CNN만 학습
-                agent.policy_optimizer = optim.Adam(policy_cnn_params, lr=1.0e-4)
-
-                # Critic: CNN만 학습, MLP freeze
-                critic_cnn_params = []
-                for critic_name in ["critic_1", "critic_2"]:
-                    critic = getattr(agent, critic_name)
-                    critic_cnn_params.extend(list(critic.lidar_extractor.parameters()))
-                    # MLP freeze
-                    for param in critic.mlp.parameters():
-                        param.requires_grad = False
-
-                agent.critic_optimizer = optim.Adam(critic_cnn_params, lr=5.0e-4)
-
-                # CNN용 학습률 스케줄러 (Stage 2만)
-                def cnn_lr_lambda(epoch):
-                    return 0.99995 ** epoch
-
-                agent.policy_cnn_scheduler = optim.lr_scheduler.LambdaLR(
-                    agent.policy_optimizer,
-                    lr_lambda=cnn_lr_lambda
-                )
-
-                agent.critic_cnn_scheduler = optim.lr_scheduler.LambdaLR(
-                    agent.critic_optimizer,
-                    lr_lambda=cnn_lr_lambda
-                )
-
-                # 스케줄러 스텝 함수
-                original_update = agent._update
-                agent._training_step_counter = 0
-
-                def update_with_scheduler(*args, **kwargs):
-                    result = original_update(*args, **kwargs)
-
-                    # CNN 학습률 감소
-                    agent.policy_cnn_scheduler.step()
-                    agent.critic_cnn_scheduler.step()
-
-                    # 로깅
-                    agent._training_step_counter += 1
-                    if agent._training_step_counter % 1000 == 0:
-                        policy_cnn_lr = agent.policy_optimizer.param_groups[0]['lr']
-                        critic_cnn_lr = agent.critic_optimizer.param_groups[0]['lr']
-                        print(f"[LR] Step {agent._training_step_counter}: "
-                              f"Policy CNN={policy_cnn_lr:.2e}, Critic CNN={critic_cnn_lr:.2e}")
-
-                    return result
-
-                agent._update = update_with_scheduler
-
-                print(f"  Policy CNN: lr=1.0e-4 (scheduled, gamma=0.99995)")
-                print(f"  Critic CNN: lr=5.0e-4 (scheduled, gamma=0.99995)")
-                print(f"  MLP: frozen (학습 안 함)")
-
-            else:
-                # ===== Stage 3: CNN + MLP 동시 학습 (Fine-tuning) =====
-                print("[INFO] Stage 3: Fine-tuning CNN + MLP together")
-
-                # CNN과 MLP 모두 학습 (분리된 학습률)
-                policy_cnn_params = list(agent.policy.lidar_extractor.parameters())
-                policy_mlp_params = list(agent.policy.mlp.parameters()) + [agent.policy.log_std_parameter]
-
-                # CNN은 낮은 학습률, MLP는 더 낮은 학습률 (fine-tuning)
-                agent.policy_optimizer = optim.Adam([
-                    {'params': policy_cnn_params, 'lr': 5.0e-5},   # CNN: 낮은 학습률
-                    {'params': policy_mlp_params, 'lr': 1.0e-5}    # MLP: 더 낮은 학습률 (fine-tune)
-                ])
-
-                # Critic도 동일
-                critic_cnn_params = []
-                critic_mlp_params = []
-                for critic_name in ["critic_1", "critic_2"]:
-                    critic = getattr(agent, critic_name)
-                    critic_cnn_params.extend(list(critic.lidar_extractor.parameters()))
-                    critic_mlp_params.extend(list(critic.mlp.parameters()))
-
-                agent.critic_optimizer = optim.Adam([
-                    {'params': critic_cnn_params, 'lr': 2.5e-4},   # CNN: 낮은 학습률
-                    {'params': critic_mlp_params, 'lr': 5.0e-5}    # MLP: 더 낮은 학습률 (fine-tune)
-                ])
-
-                # CNN용 스케줄러 (더 느리게 감소)
-                def cnn_lr_lambda(epoch):
-                    return 0.99998 ** epoch  # 더 느린 감소
-
-                agent.policy_cnn_scheduler = optim.lr_scheduler.LambdaLR(
-                    agent.policy_optimizer,
-                    lr_lambda=[cnn_lr_lambda, lambda e: 1.0]  # [CNN, MLP]
-                )
-
-                agent.critic_cnn_scheduler = optim.lr_scheduler.LambdaLR(
-                    agent.critic_optimizer,
-                    lr_lambda=[cnn_lr_lambda, lambda e: 1.0]  # [CNN, MLP]
-                )
-
-                # 스케줄러 스텝 함수
-                original_update = agent._update
-                agent._training_step_counter = 0
-
-                def update_with_scheduler(*args, **kwargs):
-                    result = original_update(*args, **kwargs)
-
-                    # CNN 학습률만 감소
-                    agent.policy_cnn_scheduler.step()
-                    agent.critic_cnn_scheduler.step()
-
-                    # 로깅
-                    agent._training_step_counter += 1
-                    if agent._training_step_counter % 1000 == 0:
-                        policy_cnn_lr = agent.policy_optimizer.param_groups[0]['lr']
-                        policy_mlp_lr = agent.policy_optimizer.param_groups[1]['lr']
-                        critic_cnn_lr = agent.critic_optimizer.param_groups[0]['lr']
-                        critic_mlp_lr = agent.critic_optimizer.param_groups[1]['lr']
-                        print(f"[LR] Step {agent._training_step_counter}: "
-                              f"Policy(CNN={policy_cnn_lr:.2e}, MLP={policy_mlp_lr:.2e}), "
-                              f"Critic(CNN={critic_cnn_lr:.2e}, MLP={critic_mlp_lr:.2e})")
-
-                    return result
-
-                agent._update = update_with_scheduler
-
-                print(f"  Policy: CNN=5.0e-5 (scheduled), MLP=1.0e-5 (fixed)")
-                print(f"  Critic: CNN=2.5e-4 (scheduled), MLP=5.0e-5 (fixed)")
-                print(f"  Fine-tuning both CNN and MLP with lower learning rates")
+            print(f"  Policy: CNN=1.0e-4, MLP=1.0e-4")
+            print(f"  Critic: CNN=5.0e-4, MLP=5.0e-4")
 
             # Create trainer
             trainer_cfg = agent_cfg["trainer"].copy()
